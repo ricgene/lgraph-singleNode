@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import json
 import asyncio
-from agent import create_workflow
+# from agent import create_workflow
+from agent import graph
 
 app = FastAPI()
 
@@ -20,7 +21,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Create the workflow
-graph = create_workflow()
+# graph = create_workflow()
 
 @app.get("/")
 def read_root():

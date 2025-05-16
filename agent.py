@@ -7,7 +7,8 @@ load_dotenv()
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
-from typing import Dict, List, Literal, TypedDict, Optional, Any
+from typing import Dict, List, Literal, TypedDict, Optional, Any, Annotated
+from typing_extensions import Annotated
 import json
 
 # Define possible outcomes
@@ -47,9 +48,8 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
     
     # If this is the first run, initialize
     if current_question == 0 and not user_input:
-        messages.append(AIMessage(content=main_questions[0]))
         return {
-            "messages": messages,
+            "messages": [AIMessage(content=main_questions[0])],
             "internal_memory": internal_memory,
             "current_question": current_question,
             "sub_question_context": sub_question_context,
@@ -62,7 +62,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
     # Process user input
     if user_input:
         # Add user response to history
-        messages.append(HumanMessage(content=user_input))
+        new_messages = messages + [HumanMessage(content=user_input)]
         
         # Check if we're in a sub-question context
         if sub_question_context:
@@ -127,13 +127,21 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                         response = llm.invoke([SystemMessage(content=f"Ask this question politely: {main_questions[current_question]}")])
                         next_q = response.content
                     
-                    messages.append(AIMessage(content=next_q))
+                    return {
+                        "messages": new_messages + [AIMessage(content=next_q)],
+                        "internal_memory": internal_memory,
+                        "current_question": current_question,
+                        "sub_question_context": sub_question_context,
+                        "sub_question_count": sub_question_count,
+                        "answers": answers,
+                        "questioning_complete": False,
+                        "outcome": "needs_more_info"
+                    }
                 else:
-                    # All main questions answered, determine outcome (code follows later)
-                    return await determine_outcome(state, messages, answers, internal_memory, stream_handler)
+                    # All main questions answered, determine outcome
+                    return await determine_outcome(state, new_messages, answers, internal_memory, stream_handler)
             else:
                 # Extract the follow-up question from the response
-                # In practice, you'd want a more robust extraction method
                 follow_up_question = follow_up_text.split("\n")[0].replace("YES, ", "")
                 
                 # Increment sub-question count
@@ -142,7 +150,17 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                 # Ask the sub-question
                 if stream_handler:
                     await stream_handler(follow_up_question)
-                messages.append(AIMessage(content=follow_up_question))
+                
+                return {
+                    "messages": new_messages + [AIMessage(content=follow_up_question)],
+                    "internal_memory": internal_memory,
+                    "current_question": current_question,
+                    "sub_question_context": sub_question_context,
+                    "sub_question_count": sub_question_count,
+                    "answers": answers,
+                    "questioning_complete": False,
+                    "outcome": "needs_more_info"
+                }
         else:
             # Process main question response
             
@@ -186,10 +204,19 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                         response = llm.invoke([SystemMessage(content=f"Ask this question politely: {main_questions[current_question]}")])
                         next_q = response.content
                     
-                    messages.append(AIMessage(content=next_q))
+                    return {
+                        "messages": new_messages + [AIMessage(content=next_q)],
+                        "internal_memory": internal_memory,
+                        "current_question": current_question,
+                        "sub_question_context": None,
+                        "sub_question_count": 0,
+                        "answers": answers,
+                        "questioning_complete": False,
+                        "outcome": "needs_more_info"
+                    }
                 else:
                     # All main questions answered, determine outcome
-                    return await determine_outcome(state, messages, answers, internal_memory, stream_handler)
+                    return await determine_outcome(state, new_messages, answers, internal_memory, stream_handler)
             else:
                 # Initialize sub-question context
                 sub_question_context = f"q{current_question}"
@@ -200,24 +227,22 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                 internal_memory[f"{sub_question_context}_main_question"] = main_questions[current_question]
                 
                 # Extract the first sub-question
-                # In practice, you'd want a more robust extraction method
                 sub_question = analysis_text.split("\n")[-1].replace("First follow-up question: ", "")
                 
                 # Ask the sub-question
                 if stream_handler:
                     await stream_handler(sub_question)
-                messages.append(AIMessage(content=sub_question))
-        
-        return {
-            "messages": messages,
-            "internal_memory": internal_memory,
-            "current_question": current_question,
-            "sub_question_context": sub_question_context,
-            "sub_question_count": sub_question_count,
-            "answers": answers,
-            "questioning_complete": False,
-            "outcome": "needs_more_info"
-        }
+                
+                return {
+                    "messages": new_messages + [AIMessage(content=sub_question)],
+                    "internal_memory": internal_memory,
+                    "current_question": current_question,
+                    "sub_question_context": sub_question_context,
+                    "sub_question_count": sub_question_count,
+                    "answers": answers,
+                    "questioning_complete": False,
+                    "outcome": "needs_more_info"
+                }
     
     # Fallback return if no user input
     return state
@@ -277,10 +302,8 @@ async def determine_outcome(state, messages, answers, internal_memory, stream_ha
         completion = llm.invoke([HumanMessage(content=completion_prompt)])
         completion_text = completion.content
     
-    messages.append(AIMessage(content=completion_text))
-    
     return {
-        "messages": messages,
+        "messages": messages + [AIMessage(content=completion_text)],
         "internal_memory": internal_memory,
         "current_question": state["current_question"],
         "sub_question_context": None,
@@ -314,23 +337,28 @@ def handle_outcome_d(state):
 # Router function based on questioning completion and outcome
 def router(state):
     if not state["questioning_complete"]:
-        return "advanced_questioning"
+        return {"next": "advanced_questioning"}
     
     # Route based on determined outcome
-    return state["outcome"]
+    return {"next": state["outcome"]}
 
 # Create the graph
 workflow = StateGraph(AgentState)
 
 # Add nodes
 workflow.add_node("advanced_questioning", advanced_questioning)
+workflow.add_node("router", router)
 workflow.add_node("outcome_a", handle_outcome_a)
 workflow.add_node("outcome_b", handle_outcome_b)
 workflow.add_node("outcome_c", handle_outcome_c)
 workflow.add_node("outcome_d", handle_outcome_d)
 
 # Add edges
-workflow.add_edge("advanced_questioning", router)
+workflow.add_edge("advanced_questioning", "router")
+workflow.add_edge("router", "outcome_a")
+workflow.add_edge("router", "outcome_b")
+workflow.add_edge("router", "outcome_c")
+workflow.add_edge("router", "outcome_d")
 workflow.add_edge("outcome_a", END)
 workflow.add_edge("outcome_b", END)
 workflow.add_edge("outcome_c", END)
