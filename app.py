@@ -42,7 +42,8 @@ async def websocket_endpoint(websocket: WebSocket):
             "sub_question_count": 0,
             "answers": {},
             "questioning_complete": False,
-            "outcome": "needs_more_info"
+            "outcome": "needs_more_info",
+            "waiting_for_user": False
         }
         
         # Function to handle streaming responses
@@ -83,7 +84,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "sub_question_count": state["sub_question_count"],
                     "answers": state["answers"].copy(),
                     "questioning_complete": state["questioning_complete"],
-                    "outcome": state["outcome"]
+                    "outcome": state["outcome"],
+                    "waiting_for_user": False
                 }
                 
                 # Add user message to state

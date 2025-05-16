@@ -24,6 +24,7 @@ class AgentState(TypedDict):
     answers: Dict
     outcome: OutcomeType
     questioning_complete: bool
+    waiting_for_user: bool
 
 # Initialize LLM
 llm = ChatOpenAI(model="gpt-4", temperature=0)
@@ -31,11 +32,17 @@ llm = ChatOpenAI(model="gpt-4", temperature=0)
 # Define the progressive questioning node with memory and sub-questions
 async def advanced_questioning(state, user_input=None, stream_handler=None):
     """Conducts a progressive series of questions with memory and sub-questions"""
+    # Check if we are waiting for a user response
+    if state.get("waiting_for_user", False):
+        return END
     # Only process if the last message is a new HumanMessage
     messages = state.get("messages", [])
     if not messages or not isinstance(messages[-1], HumanMessage):
-        # No new user input, just return state (wait for user)
-        return state
+        # No new user input, set waiting_for_user and return END
+        state["waiting_for_user"] = True
+        return END
+    # Reset waiting_for_user as we are processing a new message
+    state["waiting_for_user"] = False
     # Create a new state object to prevent concurrent updates
     new_state = {
         "messages": state.get("messages", []).copy(),  # Create a copy of messages
@@ -45,7 +52,8 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
         "sub_question_count": state.get("sub_question_count", 0),
         "answers": state.get("answers", {}).copy(),
         "questioning_complete": state.get("questioning_complete", False),
-        "outcome": state.get("outcome", "needs_more_info")
+        "outcome": state.get("outcome", "needs_more_info"),
+        "waiting_for_user": state.get("waiting_for_user", False)
     }
     
     # Rest of the function remains the same, but use new_state instead of state
