@@ -31,6 +31,11 @@ llm = ChatOpenAI(model="gpt-4", temperature=0)
 # Define the progressive questioning node with memory and sub-questions
 async def advanced_questioning(state, user_input=None, stream_handler=None):
     """Conducts a progressive series of questions with memory and sub-questions"""
+    # Only process if the last message is a new HumanMessage
+    messages = state.get("messages", [])
+    if not messages or not isinstance(messages[-1], HumanMessage):
+        # No new user input, just return state (wait for user)
+        return state
     # Create a new state object to prevent concurrent updates
     new_state = {
         "messages": state.get("messages", []).copy(),  # Create a copy of messages
@@ -405,6 +410,14 @@ workflow.add_edge("outcome_d", END)
 # Set the entry point
 workflow.set_entry_point("advanced_questioning")
 
+# Set recursion limit before compiling
+def set_workflow_config(wf):
+    if not hasattr(wf, 'config') or wf.config is None:
+        wf.config = {}
+    wf.config["recursion_limit"] = 10
+    return wf
+
+set_workflow_config(workflow)
 # Compile the graph
 graph = workflow.compile()
 
