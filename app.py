@@ -5,6 +5,7 @@ import json
 import asyncio
 # from agent import create_workflow
 from agent import graph
+from langchain_core.messages import HumanMessage, AIMessage
 
 app = FastAPI()
 
@@ -32,8 +33,8 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     
     try:
-        # Initialize state
-        state = {
+        # Initialize state with empty message list
+        initial_state = {
             "messages": [],
             "internal_memory": {},
             "current_question": 0,
@@ -46,35 +47,53 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # Function to handle streaming responses
         async def stream_handler(chunk):
-            await websocket.send_text(json.dumps({"type": "chunk", "content": chunk}))
+            try:
+                await websocket.send_text(json.dumps({"type": "chunk", "content": chunk}))
+            except Exception as e:
+                print(f"Error sending chunk: {e}")
         
         # Send initial message
-        initial_state = await graph.ainvoke(
-            state, 
-            {"stream_handler": stream_handler}
-        )
-        state = initial_state
-        
-        # Send the complete initial message
-        await websocket.send_text(json.dumps({
-            "type": "message", 
-            "content": state["messages"][-1].content
-        }))
+        try:
+            # Start the conversation with the initial state
+            state = await graph.ainvoke(initial_state)
+            
+            # Send the complete initial message
+            if state["messages"]:
+                await websocket.send_text(json.dumps({
+                    "type": "message", 
+                    "content": state["messages"][-1].content
+                }))
+        except Exception as e:
+            print(f"Error in initial state: {e}")
+            await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
+            return
         
         # Main interaction loop
         while True:
-            # Receive message from user
-            user_message = await websocket.receive_text()
-            
             try:
-                # Process with graph - using async invocation for streaming
-                new_state = await graph.ainvoke(
-                    state, 
-                    {"user_input": user_message, "stream_handler": stream_handler}
-                )
+                # Receive message from user
+                user_message = await websocket.receive_text()
+                
+                # Create a new state with the user message
+                current_state = {
+                    "messages": state["messages"].copy(),
+                    "internal_memory": state["internal_memory"].copy(),
+                    "current_question": state["current_question"],
+                    "sub_question_context": state["sub_question_context"],
+                    "sub_question_count": state["sub_question_count"],
+                    "answers": state["answers"].copy(),
+                    "questioning_complete": state["questioning_complete"],
+                    "outcome": state["outcome"]
+                }
+                
+                # Add user message to state
+                current_state["messages"].append(HumanMessage(content=user_message))
+                
+                # Process with graph
+                new_state = await graph.ainvoke(current_state)
                 
                 # Send complete message when streaming is done
-                if len(new_state["messages"]) > len(state["messages"]):
+                if new_state["messages"] and len(new_state["messages"]) > len(state["messages"]):
                     await websocket.send_text(json.dumps({
                         "type": "message", 
                         "content": new_state["messages"][-1].content
@@ -92,14 +111,17 @@ async def websocket_endpoint(websocket: WebSocket):
                             "answers": state["answers"]
                         }
                     }))
+                    # End the conversation after completion
+                    break
                     
+            except WebSocketDisconnect:
+                print("Client disconnected")
+                break
             except Exception as e:
-                # Send error message
-                await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
                 print(f"Error processing message: {e}")
+                await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
+                # Don't break the connection on error, allow retry
         
-    except WebSocketDisconnect:
-        print("Client disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
         try:

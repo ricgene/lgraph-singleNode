@@ -16,14 +16,14 @@ OutcomeType = Literal["outcome_a", "outcome_b", "outcome_c", "outcome_d", "needs
 
 # Define our state
 class AgentState(TypedDict):
-    messages: Annotated[List, "messages", "append"]  # Main conversation history
-    internal_memory: Dict[str, Any]  # Memory for storing intermediate data
-    current_question: int  # Which main question we're on
-    sub_question_context: Optional[str]  # Context for sub-questions
-    sub_question_count: int  # How many sub-questions we've asked in current context
-    answers: Dict  # Collected answers
-    outcome: OutcomeType  # Determined outcome
-    questioning_complete: bool  # Whether we've finished the questioning
+    messages: List  # Changed from Annotated to simple List to prevent concurrent update issues
+    internal_memory: Dict[str, Any]
+    current_question: int
+    sub_question_context: Optional[str]
+    sub_question_count: int
+    answers: Dict
+    outcome: OutcomeType
+    questioning_complete: bool
 
 # Initialize LLM
 llm = ChatOpenAI(model="gpt-4", temperature=0)
@@ -31,11 +31,24 @@ llm = ChatOpenAI(model="gpt-4", temperature=0)
 # Define the progressive questioning node with memory and sub-questions
 async def advanced_questioning(state, user_input=None, stream_handler=None):
     """Conducts a progressive series of questions with memory and sub-questions"""
-    internal_memory = state.get("internal_memory", {})
-    current_question = state.get("current_question", 0)
-    sub_question_context = state.get("sub_question_context", None)
-    sub_question_count = state.get("sub_question_count", 0)
-    answers = state.get("answers", {})
+    # Create a new state object to prevent concurrent updates
+    new_state = {
+        "messages": state.get("messages", []).copy(),  # Create a copy of messages
+        "internal_memory": state.get("internal_memory", {}).copy(),
+        "current_question": state.get("current_question", 0),
+        "sub_question_context": state.get("sub_question_context", None),
+        "sub_question_count": state.get("sub_question_count", 0),
+        "answers": state.get("answers", {}).copy(),
+        "questioning_complete": state.get("questioning_complete", False),
+        "outcome": state.get("outcome", "needs_more_info")
+    }
+    
+    # Rest of the function remains the same, but use new_state instead of state
+    internal_memory = new_state["internal_memory"]
+    current_question = new_state["current_question"]
+    sub_question_context = new_state["sub_question_context"]
+    sub_question_count = new_state["sub_question_count"]
+    answers = new_state["answers"]
     
     # Main questions to ask in sequence
     main_questions = [
@@ -61,7 +74,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
     # Process user input
     if user_input:
         # Add user response to history
-        state["messages"].append(HumanMessage(content=user_input))
+        new_state["messages"].append(HumanMessage(content=user_input))
         
         # Check if we're in a sub-question context
         if sub_question_context:
@@ -244,7 +257,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                 }
     
     # Fallback return if no user input
-    return state
+    return new_state
 
 # Helper function to determine final outcome
 async def determine_outcome(state, answers, internal_memory, stream_handler=None):
@@ -337,16 +350,32 @@ def handle_outcome_d(state):
 
 # Router function based on questioning completion and outcome
 def router(state):
+    """
+    Routes the state to the appropriate next node based on the current state.
+    Returns the next node name.
+    """
+    # If questioning is not complete, continue with advanced_questioning
     if not state["questioning_complete"]:
-        return {"next": "advanced_questioning"}
+        return "advanced_questioning"
     
     # Route based on determined outcome
-    return {"next": state["outcome"]}
+    outcome = state["outcome"]
+    if outcome == "outcome_a":
+        return "outcome_a"
+    elif outcome == "outcome_b":
+        return "outcome_b"
+    elif outcome == "outcome_c":
+        return "outcome_c"
+    elif outcome == "outcome_d":
+        return "outcome_d"
+    else:
+        # Default to advanced_questioning if outcome is unclear
+        return "advanced_questioning"
 
 # Create the graph
 workflow = StateGraph(AgentState)
 
-# Add nodes
+# Add nodes with proper state handling
 workflow.add_node("advanced_questioning", advanced_questioning)
 workflow.add_node("router", router)
 workflow.add_node("outcome_a", handle_outcome_a)
@@ -354,12 +383,20 @@ workflow.add_node("outcome_b", handle_outcome_b)
 workflow.add_node("outcome_c", handle_outcome_c)
 workflow.add_node("outcome_d", handle_outcome_d)
 
-# Add edges
-workflow.add_edge("advanced_questioning", "router")
-workflow.add_edge("router", "outcome_a")
-workflow.add_edge("router", "outcome_b")
-workflow.add_edge("router", "outcome_c")
-workflow.add_edge("router", "outcome_d")
+# Add edges with conditional routing
+workflow.add_conditional_edges(
+    "advanced_questioning",
+    router,
+    {
+        "advanced_questioning": "advanced_questioning",
+        "outcome_a": "outcome_a",
+        "outcome_b": "outcome_b",
+        "outcome_c": "outcome_c",
+        "outcome_d": "outcome_d"
+    }
+)
+
+# Add edges for outcomes
 workflow.add_edge("outcome_a", END)
 workflow.add_edge("outcome_b", END)
 workflow.add_edge("outcome_c", END)
@@ -370,3 +407,6 @@ workflow.set_entry_point("advanced_questioning")
 
 # Compile the graph
 graph = workflow.compile()
+
+# Export the graph for use in app.py
+__all__ = ["graph"]
