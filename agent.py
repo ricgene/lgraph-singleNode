@@ -16,7 +16,7 @@ OutcomeType = Literal["outcome_a", "outcome_b", "outcome_c", "outcome_d", "needs
 
 # Define our state
 class AgentState(TypedDict):
-    messages: List  # Main conversation history
+    messages: Annotated[List, "messages", "append"]  # Main conversation history
     internal_memory: Dict[str, Any]  # Memory for storing intermediate data
     current_question: int  # Which main question we're on
     sub_question_context: Optional[str]  # Context for sub-questions
@@ -31,7 +31,6 @@ llm = ChatOpenAI(model="gpt-4", temperature=0)
 # Define the progressive questioning node with memory and sub-questions
 async def advanced_questioning(state, user_input=None, stream_handler=None):
     """Conducts a progressive series of questions with memory and sub-questions"""
-    messages = state.get("messages", [])
     internal_memory = state.get("internal_memory", {})
     current_question = state.get("current_question", 0)
     sub_question_context = state.get("sub_question_context", None)
@@ -62,7 +61,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
     # Process user input
     if user_input:
         # Add user response to history
-        new_messages = messages + [HumanMessage(content=user_input)]
+        state["messages"].append(HumanMessage(content=user_input))
         
         # Check if we're in a sub-question context
         if sub_question_context:
@@ -128,7 +127,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                         next_q = response.content
                     
                     return {
-                        "messages": new_messages + [AIMessage(content=next_q)],
+                        "messages": [AIMessage(content=next_q)],
                         "internal_memory": internal_memory,
                         "current_question": current_question,
                         "sub_question_context": sub_question_context,
@@ -139,7 +138,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                     }
                 else:
                     # All main questions answered, determine outcome
-                    return await determine_outcome(state, new_messages, answers, internal_memory, stream_handler)
+                    return await determine_outcome(state, answers, internal_memory, stream_handler)
             else:
                 # Extract the follow-up question from the response
                 follow_up_question = follow_up_text.split("\n")[0].replace("YES, ", "")
@@ -152,7 +151,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                     await stream_handler(follow_up_question)
                 
                 return {
-                    "messages": new_messages + [AIMessage(content=follow_up_question)],
+                    "messages": [AIMessage(content=follow_up_question)],
                     "internal_memory": internal_memory,
                     "current_question": current_question,
                     "sub_question_context": sub_question_context,
@@ -205,7 +204,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                         next_q = response.content
                     
                     return {
-                        "messages": new_messages + [AIMessage(content=next_q)],
+                        "messages": [AIMessage(content=next_q)],
                         "internal_memory": internal_memory,
                         "current_question": current_question,
                         "sub_question_context": None,
@@ -216,7 +215,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                     }
                 else:
                     # All main questions answered, determine outcome
-                    return await determine_outcome(state, new_messages, answers, internal_memory, stream_handler)
+                    return await determine_outcome(state, answers, internal_memory, stream_handler)
             else:
                 # Initialize sub-question context
                 sub_question_context = f"q{current_question}"
@@ -234,7 +233,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                     await stream_handler(sub_question)
                 
                 return {
-                    "messages": new_messages + [AIMessage(content=sub_question)],
+                    "messages": [AIMessage(content=sub_question)],
                     "internal_memory": internal_memory,
                     "current_question": current_question,
                     "sub_question_context": sub_question_context,
@@ -248,49 +247,51 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
     return state
 
 # Helper function to determine final outcome
-async def determine_outcome(state, messages, answers, internal_memory, stream_handler=None):
-    """Determines the final outcome based on all collected information"""
+async def determine_outcome(state, answers, internal_memory, stream_handler=None):
+    """Analyzes collected information and determines appropriate outcome"""
+    # Create a prompt for outcome determination
+    outcome_prompt = f"""
+    Based on the following information, determine the most appropriate outcome:
     
-    # Combine all information for analysis
-    full_context = {
-        "answers": answers,
-        "internal_memory": internal_memory
-    }
+    Collected Information:
+    {json.dumps(answers, indent=2)}
     
-    # Prompt to determine outcome
-    determination_prompt = f"""
-    Based on all collected information:
-    {json.dumps(full_context, indent=2)}
+    Additional Context:
+    {json.dumps(internal_memory, indent=2)}
     
-    Analyze the user's needs and determine the most appropriate outcome:
+    Determine which outcome best matches the user's needs:
+    - outcome_a: User needs immediate implementation
+    - outcome_b: User needs a detailed proposal
+    - outcome_c: User needs more information about our services
+    - outcome_d: User's needs don't align with our services
     
-    Select one outcome from these options:
-    - outcome_a: Small project with tight timeline
-    - outcome_b: Complex project with flexible timeline
-    - outcome_c: High-budget enterprise implementation
-    - outcome_d: Low-cost solution with previous experience
-    
-    Respond with ONLY one of these outcome letters: outcome_a, outcome_b, outcome_c, or outcome_d
+    Provide your decision as a single word: outcome_a, outcome_b, outcome_c, or outcome_d
     """
     
     # Get outcome determination
-    outcome_response = llm.invoke([HumanMessage(content=determination_prompt)])
-    outcome = outcome_response.content.strip().lower()
+    if stream_handler:
+        outcome_text = ""
+        async for chunk in llm.astream([HumanMessage(content=outcome_prompt)]):
+            outcome_text += chunk.content
+            # Don't stream this decision
+    else:
+        outcome = llm.invoke([HumanMessage(content=outcome_prompt)])
+        outcome_text = outcome.content
     
-    # Ensure valid outcome
-    valid_outcomes = ["outcome_a", "outcome_b", "outcome_c", "outcome_d"]
-    if outcome not in valid_outcomes:
-        outcome = "outcome_a"  # Default if invalid
+    # Extract the outcome
+    selected_outcome = outcome_text.strip().lower()
+    if not selected_outcome.startswith("outcome_"):
+        selected_outcome = "outcome_b"  # Default to proposal if unclear
     
     # Generate completion message
     completion_prompt = f"""
-    Based on our conversation and all the information you've shared:
-    {json.dumps(full_context, indent=2)}
+    Based on the outcome {selected_outcome}, generate a professional completion message that:
+    1. Acknowledges the user's needs
+    2. Explains the next steps
+    3. Maintains a helpful and professional tone
     
-    I've determined the most appropriate path for you is: {outcome}
-    
-    Generate a friendly, detailed message explaining this outcome to the user. 
-    Reference specific things they mentioned during our conversation, including details from the sub-questions.
+    Use this information:
+    {json.dumps(answers, indent=2)}
     """
     
     if stream_handler:
@@ -303,14 +304,14 @@ async def determine_outcome(state, messages, answers, internal_memory, stream_ha
         completion_text = completion.content
     
     return {
-        "messages": messages + [AIMessage(content=completion_text)],
+        "messages": [AIMessage(content=completion_text)],
         "internal_memory": internal_memory,
-        "current_question": state["current_question"],
+        "current_question": state.get("current_question", 0),
         "sub_question_context": None,
         "sub_question_count": 0,
         "answers": answers,
         "questioning_complete": True,
-        "outcome": outcome
+        "outcome": selected_outcome
     }
 
 # Define handlers for each outcome (as in previous example)
