@@ -35,12 +35,14 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
     # Check if we are waiting for a user response
     if state.get("waiting_for_user", False):
         return END
+    
     # Only process if the last message is a new HumanMessage
     messages = state.get("messages", [])
     if not messages or not isinstance(messages[-1], HumanMessage):
-        # No new user input, set waiting_for_user and return END
+        # No new user input, set waiting_for_user and return state
         state["waiting_for_user"] = True
-        return END
+        return state  # Return state instead of END for initial state
+    
     # Reset waiting_for_user as we are processing a new message
     state["waiting_for_user"] = False
     # Create a new state object to prevent concurrent updates
