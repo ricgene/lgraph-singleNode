@@ -30,30 +30,39 @@ class State(TypedDict):
 
 # Node: Ask first question
 def ask_q1(state: State):
-    question = "What is your account number?"
-    user_input = interrupt({"question": question})
-    return {
-        "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
-        "step": "q2"
-    }
+    if "__resume_value__" in state:
+        user_input = state["__resume_value__"]
+        return {
+            "messages": [AIMessage(content="What is your account number?"), HumanMessage(content=user_input)],
+            "step": "q2"
+        }
+    else:
+        question = "What is your account number?"
+        return interrupt({"question": question})
 
 # Node: Ask second question
 def ask_q2(state: State):
-    question = "What issue are you experiencing?"
-    user_input = interrupt({"question": question})
-    return {
-        "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
-        "step": "q3"
-    }
+    if "__resume_value__" in state:
+        user_input = state["__resume_value__"]
+        return {
+            "messages": state["messages"] + [AIMessage(content="What issue are you experiencing?"), HumanMessage(content=user_input)],
+            "step": "q3"
+        }
+    else:
+        question = "What issue are you experiencing?"
+        return interrupt({"question": question})
 
 # Node: Ask third question
 def ask_q3(state: State):
-    question = "When did this issue start?"
-    user_input = interrupt({"question": question})
-    return {
-        "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
-        "step": "done"
-    }
+    if "__resume_value__" in state:
+        user_input = state["__resume_value__"]
+        return {
+            "messages": state["messages"] + [AIMessage(content="When did this issue start?"), HumanMessage(content=user_input)],
+            "step": "done"
+        }
+    else:
+        question = "When did this issue start?"
+        return interrupt({"question": question})
 
 # Node: Complete the workflow
 def finish(state: State):
