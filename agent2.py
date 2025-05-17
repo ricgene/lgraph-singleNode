@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.types import interrupt, Command
+from langgraph.types import interrupt
 from langchain_core.messages import HumanMessage, AIMessage
 import asyncio
 from dotenv import load_dotenv
@@ -16,7 +16,6 @@ def test_api_key():
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
         print("✅ OpenAI API key is loaded successfully")
-        # Print first 4 and last 4 characters of the key for verification
         masked_key = f"{api_key[:4]}...{api_key[-4:]}"
         print(f"API Key (masked): {masked_key}")
     else:
@@ -30,8 +29,8 @@ class State(TypedDict):
 
 # Node: Ask first question
 def ask_q1(state: State):
-    if "__resume_value__" in state:
-        user_input = state["__resume_value__"]
+    if "__resume" in state:
+        user_input = state["__resume"]
         return {
             "messages": [AIMessage(content="What is your account number?"), HumanMessage(content=user_input)],
             "step": "q2"
@@ -42,8 +41,8 @@ def ask_q1(state: State):
 
 # Node: Ask second question
 def ask_q2(state: State):
-    if "__resume_value__" in state:
-        user_input = state["__resume_value__"]
+    if "__resume" in state:
+        user_input = state["__resume"]
         return {
             "messages": state["messages"] + [AIMessage(content="What issue are you experiencing?"), HumanMessage(content=user_input)],
             "step": "q3"
@@ -54,8 +53,8 @@ def ask_q2(state: State):
 
 # Node: Ask third question
 def ask_q3(state: State):
-    if "__resume_value__" in state:
-        user_input = state["__resume_value__"]
+    if "__resume" in state:
+        user_input = state["__resume"]
         return {
             "messages": state["messages"] + [AIMessage(content="When did this issue start?"), HumanMessage(content=user_input)],
             "step": "done"
@@ -72,7 +71,7 @@ def finish(state: State):
         f"your issue is '{answers[1]}', and it started on '{answers[2]}'."
     )
     return {
-        "messages": [AIMessage(content=summary)],
+        "messages": state["messages"] + [AIMessage(content=summary)],
         "step": "done"
     }
 
@@ -92,8 +91,19 @@ graph = builder.compile()
 async def run_example():
     """Run an example conversation"""
     state = {"messages": [], "step": "q1"}
+    user_answers = ["123456", "Cannot access my account", "Yesterday"]
+    for answer in user_answers:
+        result = await graph.ainvoke(state)
+        print("\n--- INTERRUPT ---")
+        print("Interrupt payload:", result.get("__interrupt__"))
+        state = result.copy()
+        state["__resume"] = answer
     result = await graph.ainvoke(state)
-    print("Final state:", result)
+    print("\nFinal state:", result)
+    if result.get("step") == "done" and result.get("messages"):
+        print("\nSummary:", result["messages"][-1].content)
+    else:
+        print("\nNo summary available. Final state:", result)
 
 if __name__ == "__main__":
     asyncio.run(run_example())
