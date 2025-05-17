@@ -73,8 +73,17 @@ async def websocket_endpoint(websocket: WebSocket):
     session_id = str(uuid.uuid4())
     
     try:
-        # Initialize new session
-        sessions[session_id] = create_initial_state()
+        # Initialize new session with greeting
+        initial_state = create_initial_state()
+        sessions[session_id] = initial_state
+        
+        # Send the initial greeting message immediately
+        if initial_state["messages"]:
+            await websocket.send_text(json.dumps({
+                "type": "message", 
+                "content": initial_state["messages"][-1].content,
+                "session_id": session_id
+            }))
         
         # Function to handle streaming responses
         async def stream_handler(chunk):
@@ -86,28 +95,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 }))
             except Exception as e:
                 print(f"Error sending chunk: {e}")
-        
-        # Send initial message immediately
-        try:
-            # Start the conversation with the initial state
-            state = await graph.ainvoke(sessions[session_id])
-            sessions[session_id] = state  # Update session state
-            
-            # Send the complete initial message
-            if state["messages"]:
-                await websocket.send_text(json.dumps({
-                    "type": "message", 
-                    "content": state["messages"][-1].content,
-                    "session_id": session_id
-                }))
-        except Exception as e:
-            print(f"Error in initial state: {e}")
-            await websocket.send_text(json.dumps({
-                "type": "error", 
-                "content": str(e),
-                "session_id": session_id
-            }))
-            return
         
         # Main interaction loop
         while True:
