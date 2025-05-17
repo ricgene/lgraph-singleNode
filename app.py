@@ -71,19 +71,23 @@ def read_root():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     session_id = str(uuid.uuid4())
+    print(f"New connection established with session ID: {session_id}")
     
     try:
         # Initialize new session with greeting
         initial_state = create_initial_state()
         sessions[session_id] = initial_state
+        print(f"Initial state created with message: {initial_state['messages'][-1].content}")
         
         # Send the initial greeting message immediately
         if initial_state["messages"]:
-            await websocket.send_text(json.dumps({
+            initial_message = {
                 "type": "message", 
                 "content": initial_state["messages"][-1].content,
                 "session_id": session_id
-            }))
+            }
+            print(f"Sending initial message: {initial_message}")
+            await websocket.send_text(json.dumps(initial_message))
         
         # Function to handle streaming responses
         async def stream_handler(chunk):

@@ -151,6 +151,7 @@
             
             socket.onmessage = function(event) {
                 const data = JSON.parse(event.data);
+                console.log("Received message:", data);  // Debug log
                 
                 // Store session ID if received
                 if (data.session_id) {
@@ -188,16 +189,11 @@
                         chatContainer.removeChild(typingIndicator);
                     }
                     
-                    // If we were in the middle of streaming, remove the partial message
-                    if (currentMessageElement) {
-                        currentMessageElement.textContent = data.content;
-                    } else {
-                        // Create new message element
-                        const messageElement = document.createElement('div');
-                        messageElement.className = 'message assistant';
-                        messageElement.textContent = data.content;
-                        chatContainer.appendChild(messageElement);
-                    }
+                    // Create new message element
+                    const messageElement = document.createElement('div');
+                    messageElement.className = 'message assistant';
+                    messageElement.textContent = data.content;
+                    chatContainer.appendChild(messageElement);
                     
                     currentMessageElement = null;
                     chatContainer.scrollTop = chatContainer.scrollHeight;
