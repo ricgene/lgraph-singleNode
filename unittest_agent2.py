@@ -23,7 +23,10 @@ class TestCustomerServiceAgent(unittest.TestCase):
         # Final step (should be 'done')
         result = await graph.ainvoke(state)
         print("\nFinal state:", result)
-        print("\nSummary:", result["messages"][-1].content)
+        if result.get("step") == "done" and result.get("messages"):
+            print("\nSummary:", result["messages"][-1].content)
+        else:
+            print("\nNo summary available. Final state:", result)
         self.assertEqual(result["step"], "done")
         self.assertEqual(len(result["messages"]), 7)  # Previous + summary
         self.assertIn("thank you", result["messages"][-1].content.lower())
