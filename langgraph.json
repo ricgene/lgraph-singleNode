@@ -1,9 +1,8 @@
 {
-    "name": "customer-service-agent",
-    "description": "A customer service agent that conducts progressive questioning using LangGraph",
+    "dependencies": ["."],
     "graphs": {
-        "customer-service": {
-            "entrypoint": "agent2.py:workflow"
-        }
-    }
+        "moonpz": "agent2.py:workflow"
+    },
+    "env": ".env",
+    "python_version": "3.11"
 }
