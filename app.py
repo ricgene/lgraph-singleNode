@@ -28,7 +28,7 @@ sessions: Dict[str, Dict[str, Any]] = {}
 def create_initial_state() -> Dict[str, Any]:
     """Create a new initial state for the agent"""
     return {
-        "messages": [],
+        "messages": [AIMessage(content="Hello! I'm here to help you with your needs. Could you please tell me what you're looking for?")],
         "internal_memory": {},
         "current_question": 0,
         "sub_question_context": None,
