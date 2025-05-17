@@ -181,6 +181,10 @@
                         currentMessageElement.textContent += data.content;
                         // Scroll to bottom
                         chatContainer.scrollTop = chatContainer.scrollHeight;
+                        
+                        // Enable input after receiving any response
+                        messageInput.disabled = false;
+                        sendButton.disabled = false;
                     }
                     else if (data.type === "message") {
                         // Complete message received
@@ -244,39 +248,29 @@
             socket.onclose = function(event) {
                 console.log("WebSocket closed:", event.code, event.reason);
                 if (event.wasClean) {
-                    console.log(`Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                    console.log('Connection closed cleanly');
                 } else {
                     console.log('Connection died');
-                    // Only try to reconnect if we're not in a clean close
-                    if (event.code !== 1000) {
-                        setTimeout(connectWebSocket, 3000);
-                    }
                 }
-                // Reset session on disconnect
-                currentSessionId = null;
-                messageInput.disabled = true;
-                sendButton.disabled = true;
+                // Don't disable input on close, just try to reconnect
+                setTimeout(connectWebSocket, 1000);
             };
             
             socket.onerror = function(error) {
                 console.error("WebSocket error:", error);
-                const errorElement = document.createElement('div');
-                errorElement.className = 'error';
-                errorElement.textContent = 'Connection error. Please refresh the page.';
-                chatContainer.appendChild(errorElement);
-                messageInput.disabled = true;
-                sendButton.disabled = true;
+                // Don't disable input on error, just try to reconnect
+                setTimeout(connectWebSocket, 1000);
             };
         }
         
-        // Connect when the page loads
+        // Initial connection
         connectWebSocket();
         
         // Handle sending messages
         function sendMessage() {
             const message = messageInput.value.trim();
             if (message && socket && socket.readyState === WebSocket.OPEN) {
-                // Disable input while processing
+                // Disable input while sending
                 messageInput.disabled = true;
                 sendButton.disabled = true;
                 
@@ -285,25 +279,24 @@
                 messageElement.className = 'message user';
                 messageElement.textContent = message;
                 chatContainer.appendChild(messageElement);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
                 
                 // Clear input
                 messageInput.value = '';
                 
                 // Send message
-                const messageData = {
+                const data = {
                     content: message,
                     session_id: currentSessionId
                 };
-                console.log("Sending message:", messageData);
-                socket.send(JSON.stringify(messageData));
+                console.log("Sending message:", data);
+                socket.send(JSON.stringify(data));
                 
                 // Show typing indicator
                 const typingElement = document.createElement('div');
                 typingElement.className = 'message assistant typing-indicator';
                 typingElement.innerHTML = '<span></span><span></span><span></span>';
                 chatContainer.appendChild(typingElement);
-                
-                // Scroll to bottom
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
         }

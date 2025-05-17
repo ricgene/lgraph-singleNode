@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt.interrupt import interrupt
+from langgraph.prebuilt import interrupt
 from langchain_core.messages import HumanMessage, AIMessage
 import asyncio
 from dotenv import load_dotenv
@@ -80,15 +80,6 @@ builder.add_edge("ask_q3", "finish")
 builder.add_edge("finish", END)
 graph = builder.compile()
 
-# Example runner
-async def run_example():
-    state = {"messages": [], "step": "q1"}
-    while state["step"] != "done":
-        state = await graph.ainvoke(state)
-    print("Conversation complete.")
 
 if __name__ == "__main__":
-    # Test API key loading first
-    test_api_key()
-    # Then run the example
     asyncio.run(run_example())
