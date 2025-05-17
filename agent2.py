@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import interrupt
+from langgraph.prebuilt.interrupt import HumanInterrupt
 from langchain_core.messages import HumanMessage, AIMessage
 import asyncio
 from dotenv import load_dotenv
@@ -31,7 +31,8 @@ class State(TypedDict):
 # Node: Ask first question
 def ask_q1(state: State):
     question = "What is your account number?"
-    user_input = interrupt(question)
+    interrupt = HumanInterrupt(question)
+    user_input = interrupt.get_response()
     return {
         "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
         "step": "q2"
@@ -40,7 +41,8 @@ def ask_q1(state: State):
 # Node: Ask second question
 def ask_q2(state: State):
     question = "What issue are you experiencing?"
-    user_input = interrupt(question)
+    interrupt = HumanInterrupt(question)
+    user_input = interrupt.get_response()
     return {
         "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
         "step": "q3"
@@ -49,7 +51,8 @@ def ask_q2(state: State):
 # Node: Ask third question
 def ask_q3(state: State):
     question = "When did this issue start?"
-    user_input = interrupt(question)
+    interrupt = HumanInterrupt(question)
+    user_input = interrupt.get_response()
     return {
         "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
         "step": "done"
@@ -80,6 +83,11 @@ builder.add_edge("ask_q3", "finish")
 builder.add_edge("finish", END)
 graph = builder.compile()
 
+async def run_example():
+    """Run an example conversation"""
+    state = {"messages": [], "step": "q1"}
+    result = await graph.ainvoke(state)
+    print("Final state:", result)
 
 if __name__ == "__main__":
     asyncio.run(run_example())
