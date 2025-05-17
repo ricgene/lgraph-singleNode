@@ -142,6 +142,11 @@
             socket.onopen = function(e) {
                 console.log("WebSocket connection established");
                 sendButton.disabled = false;
+                // Show typing indicator immediately
+                const typingElement = document.createElement('div');
+                typingElement.className = 'message assistant typing-indicator';
+                typingElement.innerHTML = '<span></span><span></span><span></span>';
+                chatContainer.appendChild(typingElement);
             };
             
             socket.onmessage = function(event) {
@@ -156,6 +161,11 @@
                     // If this is the first chunk of a new message
                     if (!isStreaming) {
                         isStreaming = true;
+                        // Remove typing indicator if it exists
+                        const typingIndicator = chatContainer.querySelector('.typing-indicator');
+                        if (typingIndicator) {
+                            chatContainer.removeChild(typingIndicator);
+                        }
                         // Create new message element
                         currentMessageElement = document.createElement('div');
                         currentMessageElement.className = 'message assistant';
@@ -171,6 +181,12 @@
                 else if (data.type === "message") {
                     // Complete message received
                     isStreaming = false;
+                    
+                    // Remove typing indicator if it exists
+                    const typingIndicator = chatContainer.querySelector('.typing-indicator');
+                    if (typingIndicator) {
+                        chatContainer.removeChild(typingIndicator);
+                    }
                     
                     // If we were in the middle of streaming, remove the partial message
                     if (currentMessageElement) {

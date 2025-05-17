@@ -79,11 +79,15 @@ async def websocket_endpoint(websocket: WebSocket):
         # Function to handle streaming responses
         async def stream_handler(chunk):
             try:
-                await websocket.send_text(json.dumps({"type": "chunk", "content": chunk}))
+                await websocket.send_text(json.dumps({
+                    "type": "chunk", 
+                    "content": chunk,
+                    "session_id": session_id
+                }))
             except Exception as e:
                 print(f"Error sending chunk: {e}")
         
-        # Send initial message
+        # Send initial message immediately
         try:
             # Start the conversation with the initial state
             state = await graph.ainvoke(sessions[session_id])
@@ -98,7 +102,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 }))
         except Exception as e:
             print(f"Error in initial state: {e}")
-            await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
+            await websocket.send_text(json.dumps({
+                "type": "error", 
+                "content": str(e),
+                "session_id": session_id
+            }))
             return
         
         # Main interaction loop
