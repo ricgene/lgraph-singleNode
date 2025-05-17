@@ -261,11 +261,13 @@
                 typingElement.innerHTML = '<span></span><span></span><span></span>';
                 chatContainer.appendChild(typingElement);
                 
-                // Send to server with session ID
+                // Send to server with session ID only if it exists
                 const messageData = {
-                    content: message,
-                    session_id: currentSessionId
+                    content: message
                 };
+                if (currentSessionId) {
+                    messageData.session_id = currentSessionId;
+                }
                 socket.send(JSON.stringify(messageData));
                 
                 // Clear input and disable until response received

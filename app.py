@@ -108,7 +108,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 data = await websocket.receive_text()
                 message_data = json.loads(data)
                 user_message = message_data.get("content", "")
-                received_session_id = message_data.get("session_id", session_id)
+                received_session_id = message_data.get("session_id")
+                
+                # If no session ID provided, create a new session
+                if not received_session_id:
+                    received_session_id = str(uuid.uuid4())
+                    sessions[received_session_id] = create_initial_state()
                 
                 # Validate session
                 if received_session_id not in sessions:
