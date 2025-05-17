@@ -34,7 +34,7 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
     """Conducts a progressive series of questions with memory and sub-questions"""
     # Check if we are waiting for a user response
     if state.get("waiting_for_user", False):
-        return END
+        return state  # Return state instead of END
     
     # Only process if the last message is a new HumanMessage
     messages = state.get("messages", [])
@@ -367,8 +367,12 @@ def handle_outcome_d(state):
 def router(state):
     """
     Routes the state to the appropriate next node based on the current state.
-    Returns the next node name.
+    Returns the next node name or END.
     """
+    # If waiting for user input, end the current iteration
+    if state.get("waiting_for_user", False):
+        return END
+    
     # If questioning is not complete, continue with advanced_questioning
     if not state["questioning_complete"]:
         return "advanced_questioning"
@@ -407,7 +411,8 @@ workflow.add_conditional_edges(
         "outcome_a": "outcome_a",
         "outcome_b": "outcome_b",
         "outcome_c": "outcome_c",
-        "outcome_d": "outcome_d"
+        "outcome_d": "outcome_d",
+        END: END
     }
 )
 
