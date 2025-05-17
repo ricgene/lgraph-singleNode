@@ -14,8 +14,12 @@ class TestCustomerServiceAgent(unittest.TestCase):
             "Yesterday"                 # When issue started
         ]
 
-        # Patch the interrupt function to return responses in order
-        with patch("langgraph.prebuilt.interrupt", side_effect=user_responses):
+        # Create a mock interrupt function that returns the response from the payload
+        async def mock_interrupt(payload):
+            return user_responses.pop(0)
+
+        # Patch the interrupt function
+        with patch("langgraph.types.interrupt", side_effect=mock_interrupt):
             state = {"messages": [], "step": "q1"}
             while state["step"] != "done":
                 state = await graph.ainvoke(state)
