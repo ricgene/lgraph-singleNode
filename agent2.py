@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt.interrupt import HumanInterrupt
+from langgraph.types import interrupt, Command
 from langchain_core.messages import HumanMessage, AIMessage
 import asyncio
 from dotenv import load_dotenv
@@ -31,8 +31,7 @@ class State(TypedDict):
 # Node: Ask first question
 def ask_q1(state: State):
     question = "What is your account number?"
-    interrupt = HumanInterrupt(question)
-    user_input = interrupt.get_response()
+    user_input = interrupt({"question": question})
     return {
         "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
         "step": "q2"
@@ -41,8 +40,7 @@ def ask_q1(state: State):
 # Node: Ask second question
 def ask_q2(state: State):
     question = "What issue are you experiencing?"
-    interrupt = HumanInterrupt(question)
-    user_input = interrupt.get_response()
+    user_input = interrupt({"question": question})
     return {
         "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
         "step": "q3"
@@ -51,8 +49,7 @@ def ask_q2(state: State):
 # Node: Ask third question
 def ask_q3(state: State):
     question = "When did this issue start?"
-    interrupt = HumanInterrupt(question)
-    user_input = interrupt.get_response()
+    user_input = interrupt({"question": question})
     return {
         "messages": [AIMessage(content=question), HumanMessage(content=user_input)],
         "step": "done"
