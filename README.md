@@ -65,4 +65,61 @@ For more details about the implementation and architecture, please refer to the 
 
 - Python 3.8+
 - OpenAI API key
-- Required Python packages (see setup instructions) 
+- Required Python packages (see setup instructions)
+
+## Testing and Deployment
+
+### Environment Variables
+
+Ensure your `.env` file contains the necessary API keys:
+
+- `OPENAI_API_KEY` (for OpenAI models)
+- `LANGSMITH_API_KEY` (if using LangGraph Cloud or LangSmith)
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_HOST` (if using Langfuse)
+
+### Dependencies
+
+Install all required packages:
+
+```bash
+pip install langgraph langchain langchain_core python-dotenv
+# Add any other dependencies you use (e.g., langchain_openai)
+```
+
+### Running Tests
+
+You can run your script as is with `python your_script.py` or use `unittest` for automated tests:
+
+```bash
+python -m unittest unittest_agent2.py -v
+```
+
+### Testing with LangGraph Cloud (Optional)
+
+If you want to test or deploy on LangGraph Cloud, follow the official guide:
+
+1. Install the CLI:
+   ```bash
+   pip install -U "langgraph-cli[inmem]"
+   ```
+
+2. Set up your config and API keys.
+
+You may need to adapt your entrypoint slightly for cloud deployment, but for local testing, your code is ready.
+
+### Monitoring/Evaluation (Optional)
+
+If you want to trace or evaluate your agent with Langfuse or LangSmith, you can add their handlers as callbacks when invoking the graph.
+
+### Project Status
+
+- `workflow2.did`: Deployed to cloud, but currently unused.
+- `trace_example.py`: An unverified example.
+- `agentOnWeb.py`: Unverified.
+
+### References
+
+- [LangGraph Cloud Deployment Guide](https://langchain-ai.github.io/langgraph/cloud/deployment/test_locally/)
+- [LangGraph Agents Documentation](https://langchain-ai.github.io/langgraph/agents/agents/)
+- [Langfuse Integration Example](https://langfuse.com/docs/integrations/langchain/example-langgraph-agents)
+- [Zep LangGraph Tutorial](https://www.getzep.com/ai-agents/langgraph-tutorial) 
