@@ -3,9 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import json
 import asyncio
-# from agent import create_workflow
 from agent import graph
 from langchain_core.messages import HumanMessage, AIMessage
+from typing import Dict, Any
+import uuid
 
 app = FastAPI()
 
@@ -21,8 +22,46 @@ app.add_middleware(
 # Serve static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Create the workflow
-# graph = create_workflow()
+# In-memory session storage (replace with database in production)
+sessions: Dict[str, Dict[str, Any]] = {}
+
+def create_initial_state() -> Dict[str, Any]:
+    """Create a new initial state for the agent"""
+    return {
+        "messages": [],
+        "internal_memory": {},
+        "current_question": 0,
+        "sub_question_context": None,
+        "sub_question_count": 0,
+        "answers": {},
+        "questioning_complete": False,
+        "outcome": "needs_more_info",
+        "waiting_for_user": False
+    }
+
+def serialize_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert state to JSON-serializable format"""
+    serialized = state.copy()
+    # Convert messages to serializable format
+    serialized["messages"] = [
+        {
+            "type": "human" if isinstance(msg, HumanMessage) else "ai",
+            "content": msg.content
+        }
+        for msg in state["messages"]
+    ]
+    return serialized
+
+def deserialize_state(serialized: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert serialized state back to agent-compatible format"""
+    state = serialized.copy()
+    # Convert messages back to LangChain message objects
+    state["messages"] = [
+        HumanMessage(content=msg["content"]) if msg["type"] == "human"
+        else AIMessage(content=msg["content"])
+        for msg in serialized["messages"]
+    ]
+    return state
 
 @app.get("/")
 def read_root():
@@ -31,20 +70,11 @@ def read_root():
 @app.websocket("/chat")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    session_id = str(uuid.uuid4())
     
     try:
-        # Initialize state with empty message list
-        initial_state = {
-            "messages": [],
-            "internal_memory": {},
-            "current_question": 0,
-            "sub_question_context": None,
-            "sub_question_count": 0,
-            "answers": {},
-            "questioning_complete": False,
-            "outcome": "needs_more_info",
-            "waiting_for_user": False  # Start with False to allow initial question
-        }
+        # Initialize new session
+        sessions[session_id] = create_initial_state()
         
         # Function to handle streaming responses
         async def stream_handler(chunk):
@@ -56,13 +86,15 @@ async def websocket_endpoint(websocket: WebSocket):
         # Send initial message
         try:
             # Start the conversation with the initial state
-            state = await graph.ainvoke(initial_state)
+            state = await graph.ainvoke(sessions[session_id])
+            sessions[session_id] = state  # Update session state
             
             # Send the complete initial message
             if state["messages"]:
                 await websocket.send_text(json.dumps({
                     "type": "message", 
-                    "content": state["messages"][-1].content
+                    "content": state["messages"][-1].content,
+                    "session_id": session_id
                 }))
         except Exception as e:
             print(f"Error in initial state: {e}")
@@ -73,63 +105,80 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             try:
                 # Receive message from user
-                user_message = await websocket.receive_text()
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
+                user_message = message_data.get("content", "")
+                received_session_id = message_data.get("session_id", session_id)
                 
-                # Create a new state with the user message
-                current_state = {
-                    "messages": state["messages"].copy(),
-                    "internal_memory": state["internal_memory"].copy(),
-                    "current_question": state["current_question"],
-                    "sub_question_context": state["sub_question_context"],
-                    "sub_question_count": state["sub_question_count"],
-                    "answers": state["answers"].copy(),
-                    "questioning_complete": state["questioning_complete"],
-                    "outcome": state["outcome"],
-                    "waiting_for_user": False  # Reset waiting_for_user for new message
-                }
+                # Validate session
+                if received_session_id not in sessions:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "content": "Invalid session ID"
+                    }))
+                    continue
+                
+                # Get current state
+                current_state = sessions[received_session_id]
                 
                 # Add user message to state
                 current_state["messages"].append(HumanMessage(content=user_message))
+                current_state["waiting_for_user"] = False
                 
                 # Process with graph
                 new_state = await graph.ainvoke(current_state)
+                sessions[received_session_id] = new_state  # Update session state
                 
                 # Send complete message when streaming is done
-                if new_state["messages"] and len(new_state["messages"]) > len(state["messages"]):
+                if new_state["messages"] and len(new_state["messages"]) > len(current_state["messages"]):
                     await websocket.send_text(json.dumps({
                         "type": "message", 
-                        "content": new_state["messages"][-1].content
+                        "content": new_state["messages"][-1].content,
+                        "session_id": received_session_id
                     }))
                 
-                # Update state for next iteration
-                state = new_state
-                
                 # If we've reached a final outcome, send completion message
-                if state["questioning_complete"]:
+                if new_state["questioning_complete"]:
                     await websocket.send_text(json.dumps({
                         "type": "complete", 
                         "content": {
-                            "outcome": state["outcome"],
-                            "answers": state["answers"]
-                        }
+                            "outcome": new_state["outcome"],
+                            "answers": new_state["answers"]
+                        },
+                        "session_id": received_session_id
                     }))
-                    # End the conversation after completion
+                    # Clean up session
+                    del sessions[received_session_id]
                     break
                     
             except WebSocketDisconnect:
                 print("Client disconnected")
+                # Clean up session on disconnect
+                if session_id in sessions:
+                    del sessions[session_id]
                 break
             except Exception as e:
                 print(f"Error processing message: {e}")
-                await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "content": str(e),
+                    "session_id": session_id
+                }))
                 # Don't break the connection on error, allow retry
         
     except Exception as e:
         print(f"WebSocket error: {e}")
         try:
-            await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "content": str(e),
+                "session_id": session_id
+            }))
         except:
             pass
+        # Clean up session on error
+        if session_id in sessions:
+            del sessions[session_id]
 
 if __name__ == "__main__":
     import uvicorn

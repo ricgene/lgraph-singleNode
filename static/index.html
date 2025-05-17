@@ -129,6 +129,7 @@
         let socket;
         let isStreaming = false;
         let currentMessageElement = null;
+        let currentSessionId = null;
         
         function connectWebSocket() {
             // Get the current host and protocol
@@ -145,6 +146,11 @@
             
             socket.onmessage = function(event) {
                 const data = JSON.parse(event.data);
+                
+                // Store session ID if received
+                if (data.session_id) {
+                    currentSessionId = data.session_id;
+                }
                 
                 if (data.type === "chunk") {
                     // If this is the first chunk of a new message
@@ -191,6 +197,9 @@
                     chatContainer.scrollTop = chatContainer.scrollHeight;
                     
                     console.log("Complete data:", data.content);
+                    
+                    // Reset session
+                    currentSessionId = null;
                 }
                 else if (data.type === "error") {
                     // Error occurred
@@ -202,6 +211,11 @@
                     chatContainer.scrollTop = chatContainer.scrollHeight;
                     messageInput.disabled = false;
                     sendButton.disabled = false;
+                    
+                    // If it's a session error, reset the session
+                    if (data.content.includes("Invalid session")) {
+                        currentSessionId = null;
+                    }
                 }
             };
             
@@ -213,6 +227,8 @@
                     // Try to reconnect after a delay
                     setTimeout(connectWebSocket, 3000);
                 }
+                // Reset session on disconnect
+                currentSessionId = null;
             };
             
             socket.onerror = function(error) {
@@ -221,6 +237,8 @@
                 errorElement.className = 'error';
                 errorElement.textContent = 'Connection error. Please refresh the page.';
                 chatContainer.appendChild(errorElement);
+                // Reset session on error
+                currentSessionId = null;
             };
         }
         
@@ -243,18 +261,19 @@
                 typingElement.innerHTML = '<span></span><span></span><span></span>';
                 chatContainer.appendChild(typingElement);
                 
-                // Send to server
-                socket.send(message);
+                // Send to server with session ID
+                const messageData = {
+                    content: message,
+                    session_id: currentSessionId
+                };
+                socket.send(JSON.stringify(messageData));
                 
                 // Clear input and disable until response received
                 messageInput.value = '';
                 messageInput.disabled = true;
                 sendButton.disabled = true;
                 
-                // Scroll to bottom
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-                
-                // Remove typing indicator when first chunk of actual message arrives
+                // Remove typing indicator after a short delay
                 setTimeout(() => {
                     if (typingElement.parentNode === chatContainer) {
                         chatContainer.removeChild(typingElement);
@@ -263,13 +282,10 @@
             }
         }
         
-        // Send message when button is clicked
+        // Event listeners
         sendButton.addEventListener('click', sendMessage);
-        
-        // Send message when Enter key is pressed
-        messageInput.addEventListener('keypress', function(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
                 sendMessage();
             }
         });
