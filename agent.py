@@ -73,14 +73,25 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
         "Have you tried similar solutions before?"
     ]
     
-    # If this is the first run, initialize
-    if current_question == 0 and not user_input:
+    # Get the last user message
+    last_message = messages[-1].content if messages else ""
+    
+    # If this is the first run or we have a user message, process it
+    if current_question == 0 or last_message:
+        # Store the initial response
+        answers["initial_response"] = last_message
+        
+        # Ask the first main question
+        first_question = main_questions[0]
+        if stream_handler:
+            await stream_handler(first_question)
+        
         return {
-            "messages": [AIMessage(content=main_questions[0])],
+            "messages": [AIMessage(content=first_question)],
             "internal_memory": internal_memory,
-            "current_question": current_question,
-            "sub_question_context": sub_question_context,
-            "sub_question_count": sub_question_count,
+            "current_question": 1,  # Move to next question
+            "sub_question_context": None,
+            "sub_question_count": 0,
             "answers": answers,
             "questioning_complete": False,
             "outcome": "needs_more_info"
@@ -249,19 +260,18 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                 sub_question_context = f"q{current_question}"
                 sub_question_count = 0
                 
-                # Store the initial answer
-                internal_memory[f"{sub_question_context}_sub_0"] = user_input
-                internal_memory[f"{sub_question_context}_main_question"] = main_questions[current_question]
+                # Extract the first follow-up question
+                follow_up_question = analysis_text.split("\n")[0].replace("YES, ", "")
                 
-                # Extract the first sub-question
-                sub_question = analysis_text.split("\n")[-1].replace("First follow-up question: ", "")
+                # Store the main answer
+                answers[f"question_{current_question}"] = user_input
                 
-                # Ask the sub-question
+                # Ask the follow-up question
                 if stream_handler:
-                    await stream_handler(sub_question)
+                    await stream_handler(follow_up_question)
                 
                 return {
-                    "messages": [AIMessage(content=sub_question)],
+                    "messages": [AIMessage(content=follow_up_question)],
                     "internal_memory": internal_memory,
                     "current_question": current_question,
                     "sub_question_context": sub_question_context,
@@ -271,7 +281,6 @@ async def advanced_questioning(state, user_input=None, stream_handler=None):
                     "outcome": "needs_more_info"
                 }
     
-    # Fallback return if no user input
     return new_state
 
 # Helper function to determine final outcome

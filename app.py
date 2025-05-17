@@ -7,6 +7,11 @@ from agent import graph
 from langchain_core.messages import HumanMessage, AIMessage
 from typing import Dict, Any
 import uuid
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -27,7 +32,8 @@ sessions: Dict[str, Dict[str, Any]] = {}
 
 def create_initial_state() -> Dict[str, Any]:
     """Create a new initial state for the agent"""
-    return {
+    logger.debug("Creating initial state")
+    state = {
         "messages": [AIMessage(content="Hello! I'm here to help you with your needs. Could you please tell me what you're looking for?")],
         "internal_memory": {},
         "current_question": 0,
@@ -38,6 +44,8 @@ def create_initial_state() -> Dict[str, Any]:
         "outcome": "needs_more_info",
         "waiting_for_user": False
     }
+    logger.debug(f"Initial state created: {state}")
+    return state
 
 def serialize_state(state: Dict[str, Any]) -> Dict[str, Any]:
     """Convert state to JSON-serializable format"""
@@ -69,15 +77,16 @@ def read_root():
 
 @app.websocket("/chat")
 async def websocket_endpoint(websocket: WebSocket):
+    logger.info("New WebSocket connection request received")
     await websocket.accept()
     session_id = str(uuid.uuid4())
-    print(f"New connection established with session ID: {session_id}")
+    logger.info(f"New connection established with session ID: {session_id}")
     
     try:
         # Initialize new session with greeting
         initial_state = create_initial_state()
         sessions[session_id] = initial_state
-        print(f"Initial state created with message: {initial_state['messages'][-1].content}")
+        logger.debug(f"Session {session_id} initialized with state: {initial_state}")
         
         # Send the initial greeting message immediately
         if initial_state["messages"]:
@@ -86,36 +95,46 @@ async def websocket_endpoint(websocket: WebSocket):
                 "content": initial_state["messages"][-1].content,
                 "session_id": session_id
             }
-            print(f"Sending initial message: {initial_message}")
+            logger.info(f"Sending initial message: {initial_message}")
             await websocket.send_text(json.dumps(initial_message))
+        else:
+            logger.warning("No initial message to send!")
         
         # Function to handle streaming responses
         async def stream_handler(chunk):
             try:
+                logger.debug(f"Streaming chunk: {chunk}")
                 await websocket.send_text(json.dumps({
                     "type": "chunk", 
                     "content": chunk,
                     "session_id": session_id
                 }))
             except Exception as e:
-                print(f"Error sending chunk: {e}")
+                logger.error(f"Error sending chunk: {e}")
         
         # Main interaction loop
         while True:
             try:
                 # Receive message from user
+                logger.debug("Waiting for user message...")
                 data = await websocket.receive_text()
+                logger.info(f"Received message: {data}")
+                
                 message_data = json.loads(data)
                 user_message = message_data.get("content", "")
                 received_session_id = message_data.get("session_id")
                 
+                logger.debug(f"Parsed message - content: {user_message}, session_id: {received_session_id}")
+                
                 # If no session ID provided, create a new session
                 if not received_session_id:
                     received_session_id = str(uuid.uuid4())
+                    logger.info(f"No session ID provided, creating new session: {received_session_id}")
                     sessions[received_session_id] = create_initial_state()
                 
                 # Validate session
                 if received_session_id not in sessions:
+                    logger.error(f"Invalid session ID: {received_session_id}")
                     await websocket.send_text(json.dumps({
                         "type": "error",
                         "content": "Invalid session ID"
@@ -124,45 +143,54 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # Get current state
                 current_state = sessions[received_session_id]
+                logger.debug(f"Current state before processing: {current_state}")
                 
                 # Add user message to state
                 current_state["messages"].append(HumanMessage(content=user_message))
                 current_state["waiting_for_user"] = False
                 
                 # Process with graph
+                logger.info("Processing message with graph...")
                 new_state = await graph.ainvoke(current_state)
-                sessions[received_session_id] = new_state  # Update session state
+                logger.debug(f"New state after graph processing: {new_state}")
+                sessions[received_session_id] = new_state
                 
                 # Send complete message when streaming is done
                 if new_state["messages"] and len(new_state["messages"]) > len(current_state["messages"]):
-                    await websocket.send_text(json.dumps({
+                    response_message = {
                         "type": "message", 
                         "content": new_state["messages"][-1].content,
                         "session_id": received_session_id
-                    }))
+                    }
+                    logger.info(f"Sending response message: {response_message}")
+                    await websocket.send_text(json.dumps(response_message))
                 
                 # If we've reached a final outcome, send completion message
                 if new_state["questioning_complete"]:
-                    await websocket.send_text(json.dumps({
+                    completion_message = {
                         "type": "complete", 
                         "content": {
                             "outcome": new_state["outcome"],
                             "answers": new_state["answers"]
                         },
                         "session_id": received_session_id
-                    }))
+                    }
+                    logger.info(f"Sending completion message: {completion_message}")
+                    await websocket.send_text(json.dumps(completion_message))
                     # Clean up session
+                    logger.info(f"Cleaning up completed session: {received_session_id}")
                     del sessions[received_session_id]
                     break
                     
             except WebSocketDisconnect:
-                print("Client disconnected")
+                logger.info("Client disconnected")
                 # Clean up session on disconnect
                 if session_id in sessions:
+                    logger.info(f"Cleaning up disconnected session: {session_id}")
                     del sessions[session_id]
                 break
             except Exception as e:
-                print(f"Error processing message: {e}")
+                logger.error(f"Error processing message: {e}", exc_info=True)
                 await websocket.send_text(json.dumps({
                     "type": "error",
                     "content": str(e),
@@ -171,7 +199,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Don't break the connection on error, allow retry
         
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}", exc_info=True)
         try:
             await websocket.send_text(json.dumps({
                 "type": "error",
@@ -179,11 +207,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 "session_id": session_id
             }))
         except:
-            pass
+            logger.error("Failed to send error message to client", exc_info=True)
         # Clean up session on error
         if session_id in sessions:
+            logger.info(f"Cleaning up errored session: {session_id}")
             del sessions[session_id]
 
 if __name__ == "__main__":
     import uvicorn
+    logger.info("Starting FastAPI server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)

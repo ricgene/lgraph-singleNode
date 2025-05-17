@@ -142,6 +142,7 @@
             socket.onopen = function(e) {
                 console.log("WebSocket connection established");
                 sendButton.disabled = false;
+                messageInput.disabled = false;
                 // Show typing indicator immediately
                 const typingElement = document.createElement('div');
                 typingElement.className = 'message assistant typing-indicator';
@@ -150,149 +151,160 @@
             };
             
             socket.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                console.log("Received message:", data);  // Debug log
-                
-                // Store session ID if received
-                if (data.session_id) {
-                    currentSessionId = data.session_id;
-                }
-                
-                if (data.type === "chunk") {
-                    // If this is the first chunk of a new message
-                    if (!isStreaming) {
-                        isStreaming = true;
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log("Received message:", data);  // Debug log
+                    
+                    // Store session ID if received
+                    if (data.session_id) {
+                        currentSessionId = data.session_id;
+                        console.log("Updated session ID:", currentSessionId);
+                    }
+                    
+                    if (data.type === "chunk") {
+                        // If this is the first chunk of a new message
+                        if (!isStreaming) {
+                            isStreaming = true;
+                            // Remove typing indicator if it exists
+                            const typingIndicator = chatContainer.querySelector('.typing-indicator');
+                            if (typingIndicator) {
+                                chatContainer.removeChild(typingIndicator);
+                            }
+                            // Create new message element
+                            currentMessageElement = document.createElement('div');
+                            currentMessageElement.className = 'message assistant';
+                            currentMessageElement.textContent = '';
+                            chatContainer.appendChild(currentMessageElement);
+                        }
+                        
+                        // Add chunk to current message
+                        currentMessageElement.textContent += data.content;
+                        // Scroll to bottom
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                    }
+                    else if (data.type === "message") {
+                        // Complete message received
+                        isStreaming = false;
+                        
                         // Remove typing indicator if it exists
                         const typingIndicator = chatContainer.querySelector('.typing-indicator');
                         if (typingIndicator) {
                             chatContainer.removeChild(typingIndicator);
                         }
+                        
                         // Create new message element
-                        currentMessageElement = document.createElement('div');
-                        currentMessageElement.className = 'message assistant';
-                        currentMessageElement.textContent = '';
-                        chatContainer.appendChild(currentMessageElement);
+                        const messageElement = document.createElement('div');
+                        messageElement.className = 'message assistant';
+                        messageElement.textContent = data.content;
+                        chatContainer.appendChild(messageElement);
+                        
+                        currentMessageElement = null;
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        messageInput.disabled = false;
+                        sendButton.disabled = false;
                     }
-                    
-                    // Add chunk to current message
-                    currentMessageElement.textContent += data.content;
-                    // Scroll to bottom
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                }
-                else if (data.type === "message") {
-                    // Complete message received
-                    isStreaming = false;
-                    
-                    // Remove typing indicator if it exists
-                    const typingIndicator = chatContainer.querySelector('.typing-indicator');
-                    if (typingIndicator) {
-                        chatContainer.removeChild(typingIndicator);
-                    }
-                    
-                    // Create new message element
-                    const messageElement = document.createElement('div');
-                    messageElement.className = 'message assistant';
-                    messageElement.textContent = data.content;
-                    chatContainer.appendChild(messageElement);
-                    
-                    currentMessageElement = null;
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                    messageInput.disabled = false;
-                    sendButton.disabled = false;
-                }
-                else if (data.type === "complete") {
-                    // Processing complete
-                    const completeElement = document.createElement('div');
-                    completeElement.className = 'complete';
-                    completeElement.textContent = `Questionnaire complete! Determined outcome: ${data.content.outcome}`;
-                    chatContainer.appendChild(completeElement);
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                    
-                    console.log("Complete data:", data.content);
-                    
-                    // Reset session
-                    currentSessionId = null;
-                }
-                else if (data.type === "error") {
-                    // Error occurred
-                    isStreaming = false;
-                    const errorElement = document.createElement('div');
-                    errorElement.className = 'error';
-                    errorElement.textContent = `Error: ${data.content}`;
-                    chatContainer.appendChild(errorElement);
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                    messageInput.disabled = false;
-                    sendButton.disabled = false;
-                    
-                    // If it's a session error, reset the session
-                    if (data.content.includes("Invalid session")) {
+                    else if (data.type === "complete") {
+                        // Processing complete
+                        const completeElement = document.createElement('div');
+                        completeElement.className = 'complete';
+                        completeElement.textContent = `Questionnaire complete! Determined outcome: ${data.content.outcome}`;
+                        chatContainer.appendChild(completeElement);
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        
+                        console.log("Complete data:", data.content);
+                        
+                        // Reset session
                         currentSessionId = null;
                     }
+                    else if (data.type === "error") {
+                        // Error occurred
+                        isStreaming = false;
+                        const errorElement = document.createElement('div');
+                        errorElement.className = 'error';
+                        errorElement.textContent = `Error: ${data.content}`;
+                        chatContainer.appendChild(errorElement);
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        messageInput.disabled = false;
+                        sendButton.disabled = false;
+                        
+                        // If it's a session error, reset the session
+                        if (data.content.includes("Invalid session")) {
+                            currentSessionId = null;
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error processing message:", error);
+                    const errorElement = document.createElement('div');
+                    errorElement.className = 'error';
+                    errorElement.textContent = 'Error processing server response. Please try again.';
+                    chatContainer.appendChild(errorElement);
                 }
             };
             
             socket.onclose = function(event) {
+                console.log("WebSocket closed:", event.code, event.reason);
                 if (event.wasClean) {
                     console.log(`Connection closed cleanly, code=${event.code} reason=${event.reason}`);
                 } else {
                     console.log('Connection died');
-                    // Try to reconnect after a delay
-                    setTimeout(connectWebSocket, 3000);
+                    // Only try to reconnect if we're not in a clean close
+                    if (event.code !== 1000) {
+                        setTimeout(connectWebSocket, 3000);
+                    }
                 }
                 // Reset session on disconnect
                 currentSessionId = null;
+                messageInput.disabled = true;
+                sendButton.disabled = true;
             };
             
             socket.onerror = function(error) {
-                console.error(`WebSocket error: ${error.message}`);
+                console.error("WebSocket error:", error);
                 const errorElement = document.createElement('div');
                 errorElement.className = 'error';
                 errorElement.textContent = 'Connection error. Please refresh the page.';
                 chatContainer.appendChild(errorElement);
-                // Reset session on error
-                currentSessionId = null;
+                messageInput.disabled = true;
+                sendButton.disabled = true;
             };
         }
         
-        // Connect to WebSocket when page loads
+        // Connect when the page loads
         connectWebSocket();
         
-        // Function to send message
+        // Handle sending messages
         function sendMessage() {
             const message = messageInput.value.trim();
-            if (message && socket.readyState === WebSocket.OPEN) {
-                // Display user message
-                const userMessageElement = document.createElement('div');
-                userMessageElement.className = 'message user';
-                userMessageElement.textContent = message;
-                chatContainer.appendChild(userMessageElement);
+            if (message && socket && socket.readyState === WebSocket.OPEN) {
+                // Disable input while processing
+                messageInput.disabled = true;
+                sendButton.disabled = true;
                 
-                // Add "Assistant is typing" indicator
+                // Create user message element
+                const messageElement = document.createElement('div');
+                messageElement.className = 'message user';
+                messageElement.textContent = message;
+                chatContainer.appendChild(messageElement);
+                
+                // Clear input
+                messageInput.value = '';
+                
+                // Send message
+                const messageData = {
+                    content: message,
+                    session_id: currentSessionId
+                };
+                console.log("Sending message:", messageData);
+                socket.send(JSON.stringify(messageData));
+                
+                // Show typing indicator
                 const typingElement = document.createElement('div');
                 typingElement.className = 'message assistant typing-indicator';
                 typingElement.innerHTML = '<span></span><span></span><span></span>';
                 chatContainer.appendChild(typingElement);
                 
-                // Send to server with session ID only if it exists
-                const messageData = {
-                    content: message
-                };
-                if (currentSessionId) {
-                    messageData.session_id = currentSessionId;
-                }
-                socket.send(JSON.stringify(messageData));
-                
-                // Clear input and disable until response received
-                messageInput.value = '';
-                messageInput.disabled = true;
-                sendButton.disabled = true;
-                
-                // Remove typing indicator after a short delay
-                setTimeout(() => {
-                    if (typingElement.parentNode === chatContainer) {
-                        chatContainer.removeChild(typingElement);
-                    }
-                }, 1000);
+                // Scroll to bottom
+                chatContainer.scrollTop = chatContainer.scrollHeight;
             }
         }
         
