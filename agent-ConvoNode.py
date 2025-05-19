@@ -1,10 +1,9 @@
 from typing import TypedDict, Optional, List, Annotated, Literal
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_openai import ChatOpenAI
 import asyncio
 from dotenv import load_dotenv
 import os
