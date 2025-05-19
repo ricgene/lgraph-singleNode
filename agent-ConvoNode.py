@@ -87,6 +87,9 @@ builder.add_conditional_edges(
 )
 graph = builder.compile()
 
+__all__ = ["graph"]
+
+
 # Run the graph
 initial_state = {"conversation_history": [], "all_info_collected": False}
 final_state = graph.invoke(initial_state)
