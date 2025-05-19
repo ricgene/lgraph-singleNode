@@ -2,7 +2,7 @@
     "dependencies": ["."],
     "graphs": {
         "moonpz": "agent2:workflow",
-        "superNode": "agent-ConvoNode:graph"
+        "superNode": "agent-ConvoNode:workflow"
     },
     "env": ".env",
     "python_version": "3.11"
