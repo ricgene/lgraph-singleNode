@@ -55,21 +55,25 @@ Check what details have been provided in the conversation so far, and ask for wh
 If everything is collected, say "Thanks, I have everything I need."
 """
 
-    response = llm.predict(
-        prompt=f"{system_prompt}\n\nConversation so far:\n{conversation}\n\nWhat should you say next?"
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Conversation so far:\n{conversation}\n\nWhat should you say next?"}
+    ]
 
-    print(f"\nAssistant: {response}")
+    response = llm.invoke(messages)
+    response_text = response.content
+
+    print(f"\nAssistant: {response_text}")
     
-    if "everything I need" in response.lower():
+    if "everything I need" in response_text.lower():
         return {
-            "conversation_history": state["conversation_history"] + [f"Assistant: {response}"],
+            "conversation_history": state["conversation_history"] + [f"Assistant: {response_text}"],
             "all_info_collected": True
         }
     else:
         user_reply = input("\nYou: ")
         return {
-            "conversation_history": state["conversation_history"] + [f"Assistant: {response}", f"You: {user_reply}"],
+            "conversation_history": state["conversation_history"] + [f"Assistant: {response_text}", f"You: {user_reply}"],
             "all_info_collected": False
         }
 
