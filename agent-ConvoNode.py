@@ -90,11 +90,12 @@ graph = builder.compile()
 __all__ = ["graph"]
 
 
-# Run the graph
-initial_state = {"conversation_history": [], "all_info_collected": False}
-final_state = graph.invoke(initial_state)
+if __name__ == "__main__":
+    # Run the graph
+    initial_state = {"conversation_history": [], "all_info_collected": False}
+    final_state = graph.invoke(initial_state)
 
-# Print final result
-print("\nFinal transcript:")
-for line in final_state["conversation_history"]:
-    print(line)
+    # Print final result
+    print("\nFinal transcript:")
+    for line in final_state["conversation_history"]:
+        print(line)
