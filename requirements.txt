@@ -2,3 +2,4 @@ langchain>=0.1.0
 langchain-openai>=0.0.5  # Update to a more recent version
 langgraph>=0.2.27  # Match the version in your logs
 python-dotenv>=1.0.1
+langchain-community>=0.3.24
