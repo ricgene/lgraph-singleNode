@@ -33,6 +33,7 @@ llm = ChatOpenAI(model="gpt-3.5-turbo")
 class State(TypedDict):
     messages: list[BaseMessage]
     step: str
+    iteration: int  # Add iteration counter to state
     return_early: bool  # Flag to control early return
 
 # Question nodes
@@ -106,6 +107,14 @@ def finish(state: State):
             "return_early": state.get("return_early", False)
         }
 
+# Define the router
+def router(state: State) -> str:
+    if state["step"] == "done":
+        return "END"
+    if state["iteration"] >= 10:  # Check for max iterations
+        return "END"
+    return state["step"]
+
 # Build the workflow graph
 def create_workflow():
     builder = StateGraph(State)
@@ -134,14 +143,18 @@ __all__ = ["workflow"]
 
 # Optional: local test
 async def run_example():
-    state = {"messages": [], "step": "q1", "return_early": True}
+    state = {
+        "messages": [], 
+        "step": "q1", 
+        "return_early": True,
+        "iteration": 0  # Initialize iteration counter
+    }
     user_inputs = ["123456", "Cannot access my account", "Yesterday"]
     max_iterations = 10
-    iteration = 0
 
-    while iteration < max_iterations:
+    while state["iteration"] < max_iterations:
         result = await workflow.ainvoke(state)
-        print(f"\n--- INTERRUPT (iteration {iteration + 1}/{max_iterations}) ---")
+        print(f"\n--- INTERRUPT (iteration {state['iteration'] + 1}/{max_iterations}) ---")
         print("Interrupt payload:", result.get("__interrupt__"))
         
         if result.get("step") == "done":
@@ -151,13 +164,13 @@ async def run_example():
             break
             
         state = {k: v for k, v in result.items() if k != "__interrupt__"}
-        if iteration < len(user_inputs):
-            state["__resume"] = user_inputs[iteration]
+        if state["iteration"] < len(user_inputs):
+            state["__resume"] = user_inputs[state["iteration"]]
         else:
             print("\nReached maximum iterations without completion")
             break
             
-        iteration += 1
+        state["iteration"] += 1  # Increment iteration counter
 
 if __name__ == "__main__":
     asyncio.run(run_example())
