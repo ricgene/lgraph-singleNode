@@ -1,9 +1,9 @@
 from typing import Annotated, Literal
 from typing_extensions import TypedDict
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 import asyncio
 from dotenv import load_dotenv
@@ -31,11 +31,12 @@ llm = ChatOpenAI(model="gpt-3.5-turbo")
 
 # Define the conversation state
 class State(TypedDict):
-    messages: Annotated[list, add_messages]
-    step: Literal["q1", "q2", "q3", "done"]
+    messages: list[BaseMessage]
+    step: str
+    return_early: bool  # Flag to control early return
 
-# Question nodes (only interrupt)
-async def ask_q1(state: State):
+# Question nodes
+async def ask_q1(state: State) -> State:
     return interrupt({"question": "What is your account number?"})
 
 async def ask_q2(state: State):
@@ -49,6 +50,7 @@ async def handle_resume(state: State):
     user_input = state["__resume"]
     messages = state["messages"]
     step = state["step"]
+    return_early = state.get("return_early", False)
 
     if step == "q1":
         messages += [
@@ -57,7 +59,7 @@ async def handle_resume(state: State):
         ]
         response = await llm.ainvoke(messages)
         messages.append(AIMessage(content=response.content))
-        return {"messages": messages, "step": "q2"}
+        return {"messages": messages, "step": "q2", "return_early": return_early}
 
     elif step == "q2":
         messages += [
@@ -66,7 +68,7 @@ async def handle_resume(state: State):
         ]
         response = await llm.ainvoke(messages)
         messages.append(AIMessage(content=response.content))
-        return {"messages": messages, "step": "q3"}
+        return {"messages": messages, "step": "q3", "return_early": return_early}
 
     elif step == "q3":
         messages += [
@@ -75,10 +77,10 @@ async def handle_resume(state: State):
         ]
         response = await llm.ainvoke(messages)
         messages.append(AIMessage(content=response.content))
-        return {"messages": messages, "step": "done"}
+        return {"messages": messages, "step": "done", "return_early": return_early}
 
     else:
-        return {"messages": messages}
+        return {"messages": messages, "step": "done", "return_early": return_early}
 
 # Final node: summarize
 def finish(state: State):
@@ -93,13 +95,15 @@ def finish(state: State):
         )
         return {
             "messages": state["messages"] + [AIMessage(content=summary)],
-            "step": "done"
+            "step": "done",
+            "return_early": state.get("return_early", False)
         }
     except Exception as e:
         print(f"Error in finish: {str(e)}")
         return {
             "messages": state.get("messages", []) + [AIMessage(content="Sorry, I couldn't generate the summary.")],
-            "step": "done"
+            "step": "done",
+            "return_early": state.get("return_early", False)
         }
 
 # Build the workflow graph
@@ -113,13 +117,14 @@ def create_workflow():
 
     builder.set_entry_point("ask_q1")
 
+    # Connect nodes properly
     builder.add_edge("ask_q1", "resume")
     builder.add_edge("resume", "ask_q2")
     builder.add_edge("ask_q2", "resume")
     builder.add_edge("resume", "ask_q3")
     builder.add_edge("ask_q3", "resume")
     builder.add_edge("resume", "finish")
-    builder.add_edge("finish", END)
+    builder.add_edge("finish", END)  # Always end after finish
 
     return builder.compile()
 
@@ -129,20 +134,30 @@ __all__ = ["workflow"]
 
 # Optional: local test
 async def run_example():
-    state = {"messages": [], "step": "q1"}
+    state = {"messages": [], "step": "q1", "return_early": True}
     user_inputs = ["123456", "Cannot access my account", "Yesterday"]
+    max_iterations = 10
+    iteration = 0
 
-    for user_input in user_inputs:
+    while iteration < max_iterations:
         result = await workflow.ainvoke(state)
-        print("\n--- INTERRUPT ---")
+        print(f"\n--- INTERRUPT (iteration {iteration + 1}/{max_iterations}) ---")
         print("Interrupt payload:", result.get("__interrupt__"))
+        
+        if result.get("step") == "done":
+            print("\nFinal state:", result)
+            if result.get("messages"):
+                print("\nSummary:", result["messages"][-1].content)
+            break
+            
         state = {k: v for k, v in result.items() if k != "__interrupt__"}
-        state["__resume"] = user_input
-
-    result = await workflow.ainvoke(state)
-    print("\nFinal state:", result)
-    if result.get("step") == "done":
-        print("\nSummary:", result["messages"][-1].content)
+        if iteration < len(user_inputs):
+            state["__resume"] = user_inputs[iteration]
+        else:
+            print("\nReached maximum iterations without completion")
+            break
+            
+        iteration += 1
 
 if __name__ == "__main__":
     asyncio.run(run_example())
