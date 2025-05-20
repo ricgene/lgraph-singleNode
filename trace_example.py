@@ -1,5 +1,5 @@
 # trace_example.py
-from agent import create_workflow
+from agent_convo_node import create_workflow
 from langchain.globals import set_debug
 
 # Enable debug mode for tracing
