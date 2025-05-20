@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-if not os.getenv("LANGCHAIN_API_KEY"):
-    raise ValueError("LANGCHAIN_API_KEY not found in environment variables. Please add it to your .env file.")
+#if not os.getenv("LANGCHAIN_API_KEY"):
+#      raise ValueError("LANGCHAIN_API_KEY not found in environment variables. Please add it to your .env file.")
 
 # Use the correct API key
 client = get_sync_client(
