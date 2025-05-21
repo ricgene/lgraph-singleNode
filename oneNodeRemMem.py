@@ -30,9 +30,10 @@ def test_api_key():
 test_api_key()
 
 # Define the state structure
-class DeckState(TypedDict, total=False):
-    conversation_history: str  # String containing the Q&A history
-    all_info_collected: bool
+class DeckState:
+    def __init__(self):
+        self.conversation_history = ""
+        self.all_info_collected = False
 
 llm = ChatOpenAI(model="gpt-4", temperature=0)
 
@@ -55,107 +56,103 @@ If no useful information was learned, respond with exactly:
     response = llm.invoke(messages)
     return response.content
 
-def process_message(input_dict: Dict) -> Dict:
+def process_message(input_dict):
     """
-    Process a single message and return the updated state.
-    This is the main function to be called from the cloud.
-    
-    Args:
-        input_dict: Dictionary containing:
-            - user_input: The user's message
-            - previous_state: The previous state containing conversation history
-    
-    Returns:
-        Dict containing:
-        - question: The assistant's response (if conversation continues)
-        - conversation_history: The Q&A history
-        - is_complete: Whether the conversation is complete
+    Process a message in a stateless manner, taking a single dictionary input.
+    The input dictionary should contain:
+    - user_input: The user's message
+    - previous_state: The previous state (None for first call)
     """
-    user_input = input_dict.get("user_input", "")
-    previous_state = input_dict.get("previous_state")
+    print("\n=== Starting process_message ===")
+    print(f"Input dictionary: {input_dict}")
     
-    print("\n=== DEBUG: Input Received ===")
-    print("Input dictionary:", json.dumps(input_dict, indent=2))
+    # Extract input values
+    user_input = input_dict.get('user_input', '')
+    previous_state = input_dict.get('previous_state', None)
+    
+    print(f"\nInitial state:")
+    print(f"User input: {user_input}")
+    print(f"Previous state: {previous_state}")
     
     # Initialize or use previous state
-    state = previous_state or {
-        "conversation_history": "",
-        "all_info_collected": False
-    }
+    if previous_state is None:
+        state = DeckState()
+        print("\nCreated new state")
+    else:
+        state = DeckState()
+        state.conversation_history = previous_state.get('conversation_history', '')
+        print(f"\nRestored state with conversation history: {state.conversation_history}")
     
-    # Build the system prompt
-    system_prompt = """
-You are a helpful assistant helping a user plan a new back deck project.
-You need to gather the following information:
-1. Deck size
-2. Materials
-3. Budget
-4. Timeline
-5. Permit requirements
-
-IMPORTANT: If this is the first message (empty string), respond with exactly:
-"I'd like to discuss the deck you are building, my first question is what are the dimensions?"
-
-If you have all the information needed, respond with:
-"---begin-deck-building---
-[summary of all information gathered]"
-
-"""
+    # Build system prompt
+    system_prompt = """You are a helpful assistant gathering information for a deck project.
+    You need to collect the following information:
+    1. Deck dimensions (length x width)
+    2. Materials (wood type, composite, etc.)
+    3. Budget
+    4. Timeline
+    5. Permit requirements
+    
+    Format your responses as:
+    Question: [Your next question]
+    Learned: [What you've learned from the conversation so far]
+    
+    Start by asking about the deck dimensions if no information has been provided yet.
+    After each response, assess what new information you've learned and include it in the 'Learned' section.
+    When you have all the information, end with 'CONVERSATION_COMPLETE'."""
+    
+    # Build message list
+    messages = [
+        {"role": "system", "content": system_prompt}
+    ]
+    
     # Add conversation history if it exists
-    if state.get("conversation_history"):
-        system_prompt += "\nPrevious customer interactions:\n" + state["conversation_history"]
+    if state.conversation_history:
+        messages.append({"role": "assistant", "content": state.conversation_history})
     
-    # Build the messages list
-    messages = [{"role": "system", "content": system_prompt}]
-    
-    # Add the last user response if it exists
+    # Add user input if it exists
     if user_input:
         messages.append({"role": "user", "content": user_input})
-
-    # ---- DEBUG PRINT ----
-    print("\n=== DEBUG: State at Start of Turn ===")
-    print("Conversation History:")
-    print(state.get("conversation_history", "None"))
-    print("\nUser Response:")
-    print(user_input if user_input else "None")
+    
     print("\nMessages being sent to LLM:")
-    print(json.dumps(messages, indent=2))
-    print("=== END DEBUG ===\n")
-    # ---------------------
-
+    for msg in messages:
+        print(f"{msg['role']}: {msg['content']}")
+    
+    # Get response from LLM
     response = llm.invoke(messages)
+    print(f"\nLLM Response: {response}")
+    
+    # Extract question and learned information
     response_text = response.content
-
-    # If we have a user response, assess what was learned
-    if user_input:
-        assessment = assess_response(response_text, user_input)
-        print("\n=== DEBUG: Response Assessment ===")
-        print("Assessment:", assessment)
-        
-        # Only update history if we learned something new
-        if "I do know" in assessment:
-            new_history = state.get("conversation_history", "") + assessment + "\n"
-        else:
-            new_history = state.get("conversation_history", "")
-    else:
-        new_history = state.get("conversation_history", "")
-
-    print("\n=== DEBUG: New history created ===")
-    print("New history:", new_history)
-
-    # Check if the response indicates all information is collected
-    if "---begin-deck-building---" in response_text:
-        return {
-            "question": response_text,
-            "conversation_history": new_history,
-            "is_complete": True
-        }
-    else:
-        return {
-            "question": response_text,
-            "conversation_history": new_history,
-            "is_complete": False
-        }
+    question = ""
+    learned = ""
+    
+    # Parse the response
+    if "Question:" in response_text:
+        question = response_text.split("Question:")[1].split("Learned:")[0].strip()
+    if "Learned:" in response_text:
+        learned = response_text.split("Learned:")[1].strip()
+    
+    # Update conversation history with both the question and learned information
+    if question:
+        state.conversation_history += f"\nQuestion: {question}"
+    if learned:
+        state.conversation_history += f"\nLearned: {learned}"
+    
+    # Check if conversation is complete
+    is_complete = "CONVERSATION_COMPLETE" in response_text
+    
+    print("\nFinal state:")
+    print(f"Question: {question}")
+    print(f"Learned: {learned}")
+    print(f"Conversation history: {state.conversation_history}")
+    print(f"Is complete: {is_complete}")
+    
+    # Return the result
+    return {
+        "question": question,
+        "conversation_history": state.conversation_history,
+        "is_complete": is_complete
+    }
 
 # Build the graph
 builder = StateGraph(DeckState)
