@@ -102,6 +102,9 @@ You need to gather the following information:
 4. Timeline
 5. Permit requirements
 
+IMPORTANT: If this is the first message (no conversation history), start by asking about the deck size.
+Do not start with greetings or introductions. Be direct and ask for the first piece of information needed.
+
 """
     # Add memory summary to the prompt
     system_prompt += memory.get_summary()
@@ -223,9 +226,45 @@ def process_message(user_input: str, previous_state: Optional[Dict] = None) -> D
         "is_complete": False
     }
 
+def start_conversation() -> Dict:
+    """
+    Start a new conversation by getting the initial greeting from the assistant.
+    Returns the initial state that can be used for subsequent messages.
+    """
+    # Create initial state with empty memory
+    state = {
+        "conversation_history": [],
+        "all_info_collected": False,
+        "last_assistant_message": None,
+        "memory": DeckMemory().to_dict()
+    }
+    
+    # Process an empty message to get the initial greeting
+    result = graph.invoke(state)
+    
+    # Get the interrupt payload with the initial greeting
+    interrupt_payload = result["__interrupt__"][0].value
+    
+    return {
+        "question": interrupt_payload["question"],
+        "memory": interrupt_payload["memory"],
+        "conversation_history": interrupt_payload["conversation_history"],
+        "is_complete": False
+    }
+
 def run_example():
     """Example of how to use the process_message function"""
-    state = None
+    # Start the conversation
+    print("Starting conversation...")
+    result = start_conversation()
+    print("\nAssistant:", result["question"])
+    
+    # Initialize state for subsequent messages
+    state = {
+        "conversation_history": result["conversation_history"],
+        "last_assistant_message": result["question"],
+        "memory": result["memory"]
+    }
     
     while True:
         user_input = input("You: ")
