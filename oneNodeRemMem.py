@@ -173,7 +173,7 @@ def run_example():
     """Example of how to use the process_message function"""
     print("\n=== DEBUG: Starting Conversation ===")
     
-    # First call - get initial question
+    print("----------get question 1--------")
     first_input = {
         "user_input": "",
         "previous_state": None
@@ -188,7 +188,7 @@ def run_example():
     user_input = input("You: ")
     print("User input:", user_input)
     
-    # Second call - process first response
+    print("----------get question 2--------")
     second_input = {
         "user_input": user_input,
         "previous_state": {
@@ -203,10 +203,13 @@ def run_example():
     print("\nAssistant:", result["question"])
     
     # Continue conversation until complete
+    q = 3
     while not result["is_complete"]:
         print("\n=== DEBUG: Continuing Conversation ===")
         user_input = input("You: ")
         print("User input:", user_input)
+        print(f"----------get question {q}--------")
+        q += 1
         
         next_input = {
             "user_input": user_input,
