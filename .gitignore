@@ -1,5 +1,6 @@
 # Environment variables
 .env
+gcp-function/.env
 
 # Python
 __pycache__/
