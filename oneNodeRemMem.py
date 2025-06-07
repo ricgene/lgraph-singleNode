@@ -45,11 +45,11 @@ You are assessing a response to a question about a deck building project.
 Question asked: {question}
 User's response: {user_response}
 
-If the response contains useful information about the deck project, respond with:
+If the response contains useful information about the customer's Task, respond with:
 "I do know [specific information learned]"
 
 If no useful information was learned, respond with exactly:
-"..."
+"Thank you.  {question}"
 
 """
     messages = [{"role": "system", "content": assessment_prompt}]
@@ -84,21 +84,21 @@ def process_message(input_dict):
         print(f"\nRestored state with conversation history: {state.conversation_history}")
     
     # Build system prompt
-    system_prompt = """You are a helpful assistant gathering information for a deck project.
+    system_prompt = """You are a helpful AI Agent named Helen is helping a customer complete a home Task.  You work for Prizm which is a Real Estate Concierge Service 
     You need to collect the following information:
-    1. Deck dimensions (length x width)
-    2. Materials (wood type, composite, etc.)
-    3. Budget
-    4. Timeline
-    5. Permit requirements
-    
+    1. Are they ready to discuss their Task
+    2. Will they reach out to the contractor <C>
+    3. Do they have any concerns or questions
+
     Format your responses as:
     Question: [Your next question]
     Learned: [What you've learned from the conversation so far]
     
-    Start by asking about the deck dimensions if no information has been provided yet.
+    Start by asking about 1. above if no information has been provided yet.
     After each response, assess what new information you've learned and include it in the 'Learned' section.
-    When you have all the information, end with 'CONVERSATION_COMPLETE'."""
+    When you have all the information:
+        -close the conversation with 'Thank you for selecting Prizm, have a great rest of your day!  And take the action below 'When you have all the information ...'
+        -end with 'TASK_PROGRESSING' if user will move forward.  otherwise end end with 'TASK_ESCALATION'"""
     
     # Build message list
     messages = [
