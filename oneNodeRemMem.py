@@ -40,7 +40,7 @@ llm = ChatOpenAI(model="gpt-4", temperature=0)
 def assess_response(question: str, user_response: str) -> str:
     """Assess the user's response to determine what was learned."""
     assessment_prompt = f"""
-You are assessing a response to a question about a deck building project.
+You are assessing a response to a question about a Task.
 
 Question asked: {question}
 User's response: {user_response}
