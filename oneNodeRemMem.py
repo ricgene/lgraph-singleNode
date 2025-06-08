@@ -103,9 +103,14 @@ def process_message(input_dict):
     print(f"Input dictionary: {input_dict}")
     print(f"Input dictionary type: {type(input_dict)}")
     
-    # Extract input values
-    user_input = input_dict.get('user_input', '')
-    previous_state = input_dict.get('previous_state', None)
+    # Extract input values, handling both dict and DeckState cases
+    if isinstance(input_dict, dict):
+        user_input = input_dict.get('user_input', '')
+        previous_state = input_dict.get('previous_state', None)
+    else:
+        # If input_dict is a DeckState object
+        user_input = getattr(input_dict, 'user_input', '')
+        previous_state = getattr(input_dict, 'previous_state', None)
     
     print(f"\nInitial state:")
     print(f"User input: {user_input}")
@@ -119,8 +124,12 @@ def process_message(input_dict):
         print(f"New state attributes: {dir(state)}")
     else:
         state = DeckState()
-        state.conversation_history = previous_state.get('conversation_history', '')
-        state.is_complete = previous_state.get('is_complete', False)
+        if isinstance(previous_state, dict):
+            state.conversation_history = previous_state.get('conversation_history', '')
+            state.is_complete = previous_state.get('is_complete', False)
+        else:
+            state.conversation_history = getattr(previous_state, 'conversation_history', '')
+            state.is_complete = getattr(previous_state, 'is_complete', False)
         print(f"\nRestored state with conversation history: {state.conversation_history}")
         print(f"Restored state attributes: {dir(state)}")
         print(f"Restored state is_complete: {state.is_complete}")
