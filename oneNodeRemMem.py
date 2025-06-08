@@ -13,7 +13,7 @@ from langgraph.prebuilt import ToolNode
 import logging
 from langchain_core.tracers import ConsoleCallbackHandler
 from langchain_core.tracers.langchain import LangChainTracer
-from langchain_core.callbacks import get_callback_manager
+#from langchain_core.callbacks import get_callback_manager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
