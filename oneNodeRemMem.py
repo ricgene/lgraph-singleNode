@@ -161,6 +161,7 @@ builder.set_entry_point("collect_info")
 builder.add_conditional_edges(
     "collect_info",
     lambda state: END if state.get("is_complete") else "collect_info"
+    lambda state: END if getattr(state, "is_complete", False) else "collect_info"
 )
 graph = builder.compile()
 
