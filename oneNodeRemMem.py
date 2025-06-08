@@ -58,10 +58,11 @@ class DeckState:
         self.conversation_history = ""
         self.all_info_collected = False
         self.is_complete = False
+        self.turn_count = 0
         logger.info(f"Initialized DeckState with attributes: {dir(self)}")
 
     def __str__(self):
-        return f"DeckState(conversation_history={self.conversation_history}, is_complete={self.is_complete})"
+        return f"DeckState(conversation_history={self.conversation_history}, is_complete={self.is_complete}, turn_count={self.turn_count})"
 
     def __repr__(self):
         return self.__str__()
@@ -127,12 +128,29 @@ def process_message(input_dict):
         if isinstance(previous_state, dict):
             state.conversation_history = previous_state.get('conversation_history', '')
             state.is_complete = previous_state.get('is_complete', False)
+            state.turn_count = previous_state.get('turn_count', 0)
         else:
             state.conversation_history = getattr(previous_state, 'conversation_history', '')
             state.is_complete = getattr(previous_state, 'is_complete', False)
+            state.turn_count = getattr(previous_state, 'turn_count', 0)
         print(f"\nRestored state with conversation history: {state.conversation_history}")
         print(f"Restored state attributes: {dir(state)}")
         print(f"Restored state is_complete: {state.is_complete}")
+        print(f"Restored state turn_count: {state.turn_count}")
+    
+    # Increment turn counter
+    state.turn_count += 1
+    print(f"\nCurrent turn count: {state.turn_count}")
+    
+    # Check if we've reached the maximum number of turns
+    if state.turn_count >= 7:
+        state.is_complete = True
+        return {
+            "question": "Thank you for your time. We've reached the maximum number of turns for this conversation.",
+            "conversation_history": state.conversation_history,
+            "is_complete": True,
+            "completion_state": "OTHER"
+        }
     
     # Build system prompt
     system_prompt = """You are a helpful AI Agent named Helen is helping a customer complete a home Task.  You work for Prizm which is a Real Estate Concierge Service 
@@ -145,9 +163,14 @@ def process_message(input_dict):
     Question: [Your next question]
     Learned: [What you've learned from the conversation so far]
     
-    Start by asking about 1. above if no information has been provided yet.
-    After each response, assess what new information you've learned and include it in the 'Learned' section.
-    When you have all the information:
+    IMPORTANT RULES:
+    1. ALWAYS format your response with "Question:" and "Learned:" sections
+    2. If the user's response is unclear or doesn't answer your question:
+       - Rephrase your question to be more specific
+       - In the "Learned" section, note that the response was unclear
+    3. Start by asking about 1. above if no information has been provided yet
+    4. After each response, assess what new information you've learned and include it in the 'Learned' section
+    5. When you have all the information:
         -close the conversation with 'Thank you for selecting Prizm, have a great rest of your day!  And take the action below 'When you have all the information ...'
         -end with 'TASK_PROGRESSING' if user will move forward.  otherwise end end with 'TASK_ESCALATION'"""
     
@@ -183,6 +206,11 @@ def process_message(input_dict):
     if "Learned:" in response_text:
         learned = response_text.split("Learned:")[1].strip()
     
+    # If the response wasn't properly formatted, use the entire response as the question
+    if not question and not learned:
+        question = response_text.strip()
+        learned = "No clear information provided in the response."
+    
     # Update conversation history with both the question and learned information
     if question:
         state.conversation_history += f"\nQuestion: {question}"
@@ -193,11 +221,19 @@ def process_message(input_dict):
     is_complete = "TASK_PROGRESSING" in response_text or "TASK_ESCALATION" in response_text
     state.is_complete = is_complete
     
+    # Determine completion state
+    completion_state = "OTHER"
+    if "TASK_PROGRESSING" in response_text:
+        completion_state = "TASK_PROGRESSING"
+    elif "TASK_ESCALATION" in response_text:
+        completion_state = "TASK_ESCALATION"
+    
     print("\nFinal state:")
     print(f"Question: {question}")
     print(f"Learned: {learned}")
     print(f"Conversation history: {state.conversation_history}")
     print(f"Is complete: {is_complete}")
+    print(f"Completion state: {completion_state}")
     print(f"State type: {type(state)}")
     print(f"State attributes: {dir(state)}")
     
@@ -205,7 +241,8 @@ def process_message(input_dict):
     return {
         "question": question,
         "conversation_history": state.conversation_history,
-        "is_complete": is_complete
+        "is_complete": is_complete,
+        "completion_state": completion_state
     }
 
 # Build the graph
