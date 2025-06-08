@@ -205,9 +205,12 @@ builder.add_node("collect_info", process_message)
 builder.set_entry_point("collect_info")
 builder.add_conditional_edges(
     "collect_info",
-    lambda state: END if state.is_complete else "collect_info"
+    lambda state: END if (hasattr(state, 'is_complete') and state.is_complete) or (isinstance(state, dict) and state.get('is_complete', False)) else "collect_info"
 )
 graph = builder.compile()
+
+# Export the graph for LangGraph
+__all__ = ["graph"]
 
 def run_example():
     """Example of how to use the process_message function"""
