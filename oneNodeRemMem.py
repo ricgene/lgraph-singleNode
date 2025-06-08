@@ -22,11 +22,12 @@ logger.info(f"Python version: {sys.version}")
 logger.info(f"Current working directory: {os.getcwd()}")
 logger.info(f"Environment variables: {dict(os.environ)}")
 
-# Set up environment variables
+# Set up environment variables for LangSmith
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY", "")  # Get from .env file
 os.environ["LANGCHAIN_PROJECT"] = "lgraph-singleNode"  # Your project name
+os.environ["LANGCHAIN_TRACING_ENABLED"] = "true"
 
 # Try to load environment variables from .env file, but don't fail if it doesn't exist
 try:
