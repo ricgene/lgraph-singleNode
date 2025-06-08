@@ -8,9 +8,19 @@ import asyncio
 from dotenv import load_dotenv
 import os
 import json
+import sys
 from langgraph.prebuilt import ToolNode
 import logging
 from langsmith import trace
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Log environment information
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Current working directory: {os.getcwd()}")
+logger.info(f"Environment variables: {dict(os.environ)}")
 
 # Set up environment variables
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
@@ -18,27 +28,24 @@ os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY", "")  # Get from .env file
 os.environ["LANGCHAIN_PROJECT"] = "lgraph-singleNode"  # Your project name
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # Try to load environment variables from .env file, but don't fail if it doesn't exist
 try:
     load_dotenv(override=True)
+    logger.info("Successfully loaded .env file")
 except Exception as e:
-    print(f"Note: Could not load .env file: {str(e)}")
-    print("Continuing with existing environment variables...")
+    logger.warning(f"Could not load .env file: {str(e)}")
+    logger.info("Continuing with existing environment variables...")
 
 def test_api_key():
     """Test if the OpenAI API key is loaded correctly."""
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
-        print("✅ OpenAI API key is loaded successfully")
+        logger.info("✅ OpenAI API key is loaded successfully")
         masked_key = f"{api_key[:4]}...{api_key[-4:]}"
-        print(f"API Key (masked): {masked_key}")
+        logger.info(f"API Key (masked): {masked_key}")
     else:
-        print("❌ OpenAI API key is not loaded")
-        print("Please set OPENAI_API_KEY in your .env or environment.")
+        logger.error("❌ OpenAI API key is not loaded")
+        logger.error("Please set OPENAI_API_KEY in your .env or environment.")
 
 test_api_key()
 
@@ -48,6 +55,13 @@ class DeckState:
         self.conversation_history = ""
         self.all_info_collected = False
         self.is_complete = False
+        logger.info(f"Initialized DeckState with attributes: {dir(self)}")
+
+    def __str__(self):
+        return f"DeckState(conversation_history={self.conversation_history}, is_complete={self.is_complete})"
+
+    def __repr__(self):
+        return self.__str__()
 
 llm = ChatOpenAI(model="gpt-4", temperature=0)
 
@@ -77,19 +91,33 @@ def process_message(input_dict):
     - user_input: The user's message
     - previous_state: The previous state (None for first call)
     """
+    print("\n=== DEBUG: Starting process_message ===")
+    print(f"Input dictionary: {input_dict}")
+    print(f"Input dictionary type: {type(input_dict)}")
+    
     with trace("process_message", metadata={"input": input_dict}):
         # Extract input values
         user_input = input_dict.get('user_input', '')
         previous_state = input_dict.get('previous_state', None)
         
+        print(f"\nInitial state:")
+        print(f"User input: {user_input}")
+        print(f"Previous state: {previous_state}")
+        print(f"Previous state type: {type(previous_state)}")
+        
         with trace("state_initialization", metadata={"previous_state": previous_state}):
             # Initialize or use previous state
             if previous_state is None:
                 state = DeckState()
+                print("\nCreated new state")
+                print(f"New state attributes: {dir(state)}")
             else:
                 state = DeckState()
                 state.conversation_history = previous_state.get('conversation_history', '')
                 state.is_complete = previous_state.get('is_complete', False)
+                print(f"\nRestored state with conversation history: {state.conversation_history}")
+                print(f"Restored state attributes: {dir(state)}")
+                print(f"Restored state is_complete: {state.is_complete}")
         
         # Build system prompt
         system_prompt = """You are a helpful AI Agent named Helen is helping a customer complete a home Task.  You work for Prizm which is a Real Estate Concierge Service 
@@ -121,9 +149,14 @@ def process_message(input_dict):
         if user_input:
             messages.append({"role": "user", "content": user_input})
         
+        print("\nMessages being sent to LLM:")
+        for msg in messages:
+            print(f"{msg['role']}: {msg['content']}")
+        
         with trace("llm_call", metadata={"messages": messages}):
             # Get response from LLM
             response = llm.invoke(messages)
+            print(f"\nLLM Response: {response}")
         
         # Extract question and learned information
         response_text = response.content
@@ -146,11 +179,21 @@ def process_message(input_dict):
         is_complete = "TASK_PROGRESSING" in response_text or "TASK_ESCALATION" in response_text
         state.is_complete = is_complete
         
+        print("\nFinal state:")
+        print(f"Question: {question}")
+        print(f"Learned: {learned}")
+        print(f"Conversation history: {state.conversation_history}")
+        print(f"Is complete: {is_complete}")
+        print(f"State type: {type(state)}")
+        print(f"State attributes: {dir(state)}")
+        
         with trace("step", metadata={
             "question": question,
             "learned": learned,
             "is_complete": is_complete,
-            "conversation_history": state.conversation_history
+            "conversation_history": state.conversation_history,
+            "state_type": str(type(state)),
+            "state_attributes": dir(state)
         }):
             # Return the result
             return {
