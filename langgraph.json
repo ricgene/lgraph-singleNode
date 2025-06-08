@@ -1,6 +1,6 @@
 {
     "dependencies": ["."],
-    "graphs": {,
+    "graphs": {
         "moBettah": "oneNodeRemMem:graph"
     },
     "env": ".env",
