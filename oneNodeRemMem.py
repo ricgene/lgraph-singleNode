@@ -9,13 +9,14 @@ from dotenv import load_dotenv
 import os
 import json
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint import BaseCheckpointSaver
-from langgraph.checkpoint.memory import MemorySaver
 import logging
 from langsmith import trace
 
 # Set up environment variables
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY", "")  # Get from .env file
+os.environ["LANGCHAIN_PROJECT"] = "lgraph-singleNode"  # Your project name
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
