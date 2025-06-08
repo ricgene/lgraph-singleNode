@@ -66,6 +66,7 @@ def process_message(input_dict):
     """
     print("\n=== Starting process_message ===")
     print(f"Input dictionary: {input_dict}")
+    print(f"Input dictionary type: {type(input_dict)}")
     
     # Extract input values
     user_input = input_dict.get('user_input', '')
@@ -74,15 +75,20 @@ def process_message(input_dict):
     print(f"\nInitial state:")
     print(f"User input: {user_input}")
     print(f"Previous state: {previous_state}")
+    print(f"Previous state type: {type(previous_state)}")
     
     # Initialize or use previous state
     if previous_state is None:
         state = DeckState()
         print("\nCreated new state")
+        print(f"New state attributes: {dir(state)}")
     else:
         state = DeckState()
         state.conversation_history = previous_state.get('conversation_history', '')
+        state.is_complete = previous_state.get('is_complete', False)
         print(f"\nRestored state with conversation history: {state.conversation_history}")
+        print(f"Restored state attributes: {dir(state)}")
+        print(f"Restored state is_complete: {state.is_complete}")
     
     # Build system prompt
     system_prompt = """You are a helpful AI Agent named Helen is helping a customer complete a home Task.  You work for Prizm which is a Real Estate Concierge Service 
