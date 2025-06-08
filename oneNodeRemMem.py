@@ -34,6 +34,7 @@ class DeckState:
     def __init__(self):
         self.conversation_history = ""
         self.all_info_collected = False
+        self.is_complete = False
 
 llm = ChatOpenAI(model="gpt-4", temperature=0)
 
@@ -140,6 +141,7 @@ def process_message(input_dict):
     
     # Check if conversation is complete
     is_complete = "TASK_PROGRESSING" in response_text or "TASK_ESCALATION" in response_text
+    state.is_complete = is_complete
     
     print("\nFinal state:")
     print(f"Question: {question}")
@@ -160,7 +162,7 @@ builder.add_node("collect_info", process_message)
 builder.set_entry_point("collect_info")
 builder.add_conditional_edges(
     "collect_info",
-    lambda state: END if getattr(state, "is_complete", False) else "collect_info"
+    lambda state: END if state.is_complete else "collect_info"
 )
 graph = builder.compile()
 
