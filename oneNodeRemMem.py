@@ -128,22 +128,19 @@ def process_message(input_dict):
         if isinstance(previous_state, dict):
             state.conversation_history = previous_state.get('conversation_history', '')
             state.is_complete = previous_state.get('is_complete', False)
-            state.turn_count = previous_state.get('turn_count', 0)
         else:
             state.conversation_history = getattr(previous_state, 'conversation_history', '')
             state.is_complete = getattr(previous_state, 'is_complete', False)
-            state.turn_count = getattr(previous_state, 'turn_count', 0)
         print(f"\nRestored state with conversation history: {state.conversation_history}")
         print(f"Restored state attributes: {dir(state)}")
         print(f"Restored state is_complete: {state.is_complete}")
-        print(f"Restored state turn_count: {state.turn_count}")
     
-    # Increment turn counter
-    state.turn_count += 1
-    print(f"\nCurrent turn count: {state.turn_count}")
+    # Count turns by counting Q&A pairs in conversation history
+    turn_count = state.conversation_history.count("Question:")
+    print(f"\nCurrent turn count (from Q&A pairs): {turn_count}")
     
     # Check if we've reached the maximum number of turns
-    if state.turn_count >= 7:
+    if turn_count >= 7:
         state.is_complete = True
         return {
             "question": "Thank you for your time. We've reached the maximum number of turns for this conversation.",
@@ -153,7 +150,7 @@ def process_message(input_dict):
         }
     
     # Build system prompt
-    system_prompt = """You are a helpful AI Agent named Helen is helping a customer complete a home Task.  You work for Prizm which is a Real Estate Concierge Service 
+    system_prompt = f"""You are a helpful AI Agent named Helen is helping a customer complete a home Task.  You work for Prizm which is a Real Estate Concierge Service 
     You need to collect the following information:
     1. Are they ready to discuss their Task
     2. Will they reach out to the contractor <C>
@@ -172,7 +169,8 @@ def process_message(input_dict):
     4. After each response, assess what new information you've learned and include it in the 'Learned' section
     5. When you have all the information:
         -close the conversation with 'Thank you for selecting Prizm, have a great rest of your day!  And take the action below 'When you have all the information ...'
-        -end with 'TASK_PROGRESSING' if user will move forward.  otherwise end end with 'TASK_ESCALATION'"""
+        -end with 'TASK_PROGRESSING' if user will move forward.  otherwise end end with 'TASK_ESCALATION'
+    6. Current turn count: {turn_count}/7. You have {7 - turn_count} turns remaining."""
     
     # Build message list
     messages = [
