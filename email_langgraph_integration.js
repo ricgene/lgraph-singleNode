@@ -2,15 +2,129 @@ const nodemailer = require('nodemailer');
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
 const axios = require('axios');
+// const { initializeApp } = require('firebase/app');
+// const { getFirestore, doc, getDoc, setDoc, collection } = require('firebase/firestore');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
-// Import the LangGraph process_message function (we'll need to adapt this)
-// For now, we'll simulate the conversation state
+// Firebase configuration - DISABLED for now
+// const firebaseConfig = {
+//   apiKey: process.env.FIREBASE_API_KEY,
+//   authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+//   projectId: process.env.FIREBASE_PROJECT_ID,
+//   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+//   messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+//   appId: process.env.FIREBASE_APP_ID
+// };
+
+// Initialize Firebase - DISABLED for now
+let db = null;
+// try {
+//   const app = initializeApp(firebaseConfig);
+//   db = getFirestore(app);
+//   console.log('✅ Firebase initialized successfully');
+// } catch (error) {
+//   console.warn('⚠️ Firebase not configured, falling back to file-based storage');
+//   console.warn('Set FIREBASE_* environment variables to use Firestore');
+// }
+
+console.log('📁 Using file-based storage for conversation states');
 
 // Debug: Check if environment variables are loaded
 console.log('Gmail User:', process.env.GMAIL_USER);
 console.log('App Password length:', process.env.GMAIL_APP_PASSWORD ? process.env.GMAIL_APP_PASSWORD.length : 0);
 console.log('Email Function URL:', process.env.EMAIL_FUNCTION_URL);
+
+// File to store conversation states persistently
+const CONVERSATION_STATES_FILE = 'conversation_states.json';
+
+// Function to load conversation states from Firestore or file
+async function loadConversationStates() {
+  if (db) {
+    try {
+      // Load all conversation states from Firestore
+      const conversationStates = {};
+      // Note: In a real implementation, you'd want to paginate this
+      // For now, we'll load states as needed per user
+      return conversationStates;
+    } catch (error) {
+      console.error('Error loading conversation states from Firestore:', error.message);
+      return {};
+    }
+  } else {
+    // Fallback to file-based storage
+    try {
+      if (fs.existsSync(CONVERSATION_STATES_FILE)) {
+        const data = fs.readFileSync(CONVERSATION_STATES_FILE, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (error) {
+      console.error('Error loading conversation states from file:', error.message);
+    }
+    return {};
+  }
+}
+
+// Function to save conversation state for a specific user
+async function saveConversationState(userEmail, conversationState) {
+  if (db) {
+    try {
+      // Save to Firestore
+      const userDoc = doc(db, 'conversation_states', userEmail);
+      await setDoc(userDoc, {
+        ...conversationState,
+        lastUpdated: new Date().toISOString()
+      });
+      console.log(`✅ Saved conversation state to Firestore for ${userEmail}`);
+    } catch (error) {
+      console.error('Error saving conversation state to Firestore:', error.message);
+    }
+  } else {
+    // Fallback to file-based storage
+    try {
+      let conversationStates = {};
+      if (fs.existsSync(CONVERSATION_STATES_FILE)) {
+        const data = fs.readFileSync(CONVERSATION_STATES_FILE, 'utf8');
+        conversationStates = JSON.parse(data);
+      }
+      conversationStates[userEmail] = conversationState;
+      fs.writeFileSync(CONVERSATION_STATES_FILE, JSON.stringify(conversationStates, null, 2));
+    } catch (error) {
+      console.error('Error saving conversation state to file:', error.message);
+    }
+  }
+}
+
+// Function to load conversation state for a specific user
+async function loadConversationState(userEmail) {
+  if (db) {
+    try {
+      // Load from Firestore
+      const userDoc = doc(db, 'conversation_states', userEmail);
+      const docSnap = await getDoc(userDoc);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        console.log(`✅ Loaded conversation state from Firestore for ${userEmail}`);
+        return data;
+      }
+    } catch (error) {
+      console.error('Error loading conversation state from Firestore:', error.message);
+    }
+  } else {
+    // Fallback to file-based storage
+    try {
+      if (fs.existsSync(CONVERSATION_STATES_FILE)) {
+        const data = fs.readFileSync(CONVERSATION_STATES_FILE, 'utf8');
+        const conversationStates = JSON.parse(data);
+        return conversationStates[userEmail] || null;
+      }
+    } catch (error) {
+      console.error('Error loading conversation state from file:', error.message);
+    }
+  }
+  return null;
+}
 
 // Create a transporter for sending emails
 async function createTransporter() {
@@ -167,11 +281,19 @@ function checkEmails(conversationStates, processedEmails) {
               
               // Get or create conversation state for this user
               if (!conversationStates[userEmail]) {
-                conversationStates[userEmail] = {
-                  conversation_history: "",
-                  is_complete: false,
-                  user_email: userEmail
-                };
+                // Try to load existing state from storage
+                const existingState = await loadConversationState(userEmail);
+                if (existingState) {
+                  conversationStates[userEmail] = existingState;
+                  console.log(`✅ Loaded existing conversation state for ${userEmail}`);
+                } else {
+                  conversationStates[userEmail] = {
+                    conversation_history: "",
+                    is_complete: false,
+                    user_email: userEmail
+                  };
+                  console.log(`✅ Created new conversation state for ${userEmail}`);
+                }
               }
               
               // Process the user's response through LangGraph
@@ -183,6 +305,9 @@ function checkEmails(conversationStates, processedEmails) {
                 is_complete: result.is_complete,
                 user_email: userEmail
               };
+              
+              // Save conversation state to storage
+              await saveConversationState(userEmail, conversationStates[userEmail]);
               
               // Send the next question if conversation is not complete
               if (!result.is_complete && result.question) {
@@ -242,11 +367,11 @@ Prizm Real Estate Concierge Service`
 }
 
 // Function to start watching for new emails
-function startWatchingEmails() {
+async function startWatchingEmails() {
   console.log('Starting to watch for new Prizm email replies...');
   
   // Store conversation states for each user
-  const conversationStates = {};
+  const conversationStates = await loadConversationStates();
   
   // Track processed email IDs to prevent duplicates
   const processedEmails = new Set();
@@ -263,6 +388,7 @@ function startWatchingEmails() {
   return () => {
     clearInterval(interval);
     console.log('Stopped watching for new emails');
+    // Note: We don't need to save all states on shutdown since we save per user
   };
 }
 
@@ -302,25 +428,25 @@ Prizm Real Estate Concierge Service`
   return result;
 }
 
-// Example usage
+// Main function to start the email integration
 async function main() {
+  console.log('Starting LangGraph Email Integration...');
+  
   try {
-    console.log('Starting LangGraph Email Integration...');
+    // Start watching for emails
+    const stopWatching = await startWatchingEmails();
     
-    // Start watching for email replies
-    const stopWatching = startWatchingEmails();
+    console.log('Email integration is running. Press Ctrl+C to stop.');
     
-    // Keep the process running
+    // Handle graceful shutdown
     process.on('SIGINT', () => {
-      console.log('Shutting down...');
+      console.log('\nShutting down...');
       stopWatching();
       process.exit(0);
     });
     
-    console.log('Email integration is running. Press Ctrl+C to stop.');
-    
   } catch (error) {
-    console.error('Error in main:', error);
+    console.error('Error starting email integration:', error);
     process.exit(1);
   }
 }
