@@ -84,7 +84,7 @@ async function processUserResponse(userEmail, userResponse, conversationState) {
 }
 
 // Function to check for new emails and process them
-function checkEmails(conversationStates) {
+function checkEmails(conversationStates, processedEmails) {
   const imap = createImapConnection();
 
   imap.once('ready', () => {
@@ -110,12 +110,25 @@ function checkEmails(conversationStates) {
           return;
         }
 
-        const fetch = imap.fetch(results, { bodies: '' });
+        console.log(`Found ${results.length} new Prizm email replies`);
+
+        const fetch = imap.fetch(results, { bodies: '', markSeen: true });
         
-        fetch.on('message', (msg) => {
+        fetch.on('message', (msg, seqno) => {
+          console.log('Processing message #', seqno);
+          
           msg.on('body', async (stream) => {
             simpleParser(stream, async (err, parsed) => {
               if (err) throw err;
+              
+              // Create a unique identifier for this email
+              const emailId = `${parsed.messageId || parsed.date}-${parsed.from.text}`;
+              
+              // Check if we've already processed this email
+              if (processedEmails.has(emailId)) {
+                console.log('Skipping already processed email:', emailId);
+                return;
+              }
               
               // Extract user's email address
               const userEmail = parsed.from.text.match(/<(.+)>/)?.[1] || parsed.from.text;
@@ -171,6 +184,8 @@ Prizm Real Estate Concierge Service`
                 );
               }
               
+              // Mark this email as processed
+              processedEmails.add(emailId);
               console.log('Processed email reply for:', userEmail);
             });
           });
@@ -206,12 +221,15 @@ function startWatchingEmails() {
   // Store conversation states for each user
   const conversationStates = {};
   
+  // Track processed email IDs to prevent duplicates
+  const processedEmails = new Set();
+  
   // Check immediately
-  checkEmails(conversationStates);
+  checkEmails(conversationStates, processedEmails);
   
   // Then check every 2 minutes (more frequent for better responsiveness)
   const interval = setInterval(() => {
-    checkEmails(conversationStates);
+    checkEmails(conversationStates, processedEmails);
   }, 2 * 60 * 1000);
   
   // Return function to stop watching

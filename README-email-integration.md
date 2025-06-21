@@ -1,176 +1,247 @@
-# LangGraph Email Integration
+# Email Integration Testing Guide
 
-This project integrates LangGraph conversation agents with email functionality, allowing users to have conversations via email with an AI agent.
+This guide explains how to test the complete email integration system that combines LangGraph conversation agent with email functionality.
 
-## Architecture
+## System Overview
 
-```
-User Email ↔ IMAP (Receive) ↔ Node.js ↔ HTTP API ↔ Python Flask ↔ LangGraph
-                ↓
-            GCP Function (Send) ↔ User Email
-```
+The email integration system consists of:
+1. **LangGraph Server** (`langgraph_server.py`) - Flask server exposing LangGraph functions
+2. **Email Integration** (`email_langgraph_integration.js`) - Node.js service that watches for email replies
+3. **GCP Email Function** - Deployed Cloud Function for sending emails
+4. **LangGraph Agent** (`oneNodeRemMem.py`) - Core conversation logic
 
-## Setup
+## Prerequisites
 
-### 1. Install Dependencies
+### 1. Environment Setup
 
-**Python Dependencies:**
+Ensure you have the following environment variables in your `.env` file:
+
 ```bash
+# OpenAI API Key
+OPENAI_API_KEY=sk-proj-your-openai-key-here
+
+# Gmail credentials for receiving emails
+GMAIL_USER=your-gmail@gmail.com
+GMAIL_APP_PASSWORD=your-gmail-app-password
+
+# Deployed GCP email function URL
+EMAIL_FUNCTION_URL=https://your-deployed-function-url.a.run.app
+
+# LangChain/LangSmith (optional)
+LANGCHAIN_API_KEY=your-langsmith-key
+LANGSMITH_API_KEY=your-langsmith-key
+```
+
+### 2. Gmail App Password Setup
+
+1. Go to your Google Account settings
+2. Enable 2-factor authentication
+3. Generate an App Password for "Mail"
+4. Use this App Password in your `.env` file
+
+### 3. Dependencies Installation
+
+#### Python Dependencies
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Install Python dependencies
 pip install -r requirements.txt
 ```
 
-**Node.js Dependencies:**
+#### Node.js Dependencies
 ```bash
+# Install Node.js dependencies
 npm install
 ```
 
-### 2. Environment Variables
+## Testing the Email Integration
 
-Create a `.env` file with:
+### Step 1: Start the LangGraph Server
 
-```env
-# Gmail Configuration
-GMAIL_USER=your-email@gmail.com
-GMAIL_APP_PASSWORD=your-app-password
-
-# GCP Email Function
-EMAIL_FUNCTION_URL=https://sendemail-cs64iuly6q-uc.a.run.app
-
-# LangGraph Configuration
-OPENAI_API_KEY=sk-proj-...
-LANGCHAIN_API_KEY=lsv2_pt_...
-LANGGRAPH_CLOUD_LICENSE_KEY=lsv2_pt_...
-LANGSMITH_API_KEY=lsv2_pt_...
-```
-
-### 3. Deploy GCP Email Function
-
-Follow the instructions in `../gcp-agent-email2user/readme-deploy.md` to deploy the email sending function.
-
-## Running the Integration
-
-### Option 1: Run Both Services (Recommended)
-
-**Terminal 1 - Start the Python Flask server:**
+In one terminal:
 ```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Start the Flask server
 python langgraph_server.py
 ```
 
-**Terminal 2 - Start the Node.js email watcher:**
+Expected output:
+```
+Starting LangGraph Email Integration Server...
+Server will be available at: http://localhost:8000
+Endpoints:
+  POST /process_message - Process user responses
+  POST /start_conversation - Start new conversation
+  GET /health - Health check
+Press Ctrl+C to stop the server
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8000
+```
+
+### Step 2: Start the Email Watcher
+
+In another terminal:
 ```bash
+# Activate virtual environment (for environment variables)
+source venv/bin/activate
+
+# Start the email watcher
 node email_langgraph_integration.js
 ```
 
-### Option 2: Use npm scripts
-
-**Terminal 1:**
-```bash
-npm run server
+Expected output:
+```
+Gmail User: your-gmail@gmail.com
+App Password length: 16
+Email Function URL: https://your-deployed-function-url.a.run.app
+Starting LangGraph Email Integration...
+Starting to watch for new Prizm email replies...
+Email integration is running. Press Ctrl+C to stop.
+IMAP search date: 21-Jun-2025
+No new Prizm email replies
 ```
 
-**Terminal 2:**
-```bash
-npm start
+### Step 3: Test the Email Flow
+
+#### Option A: Start a New Conversation
+
+Send an email to your Gmail account with:
+- **Subject**: `Re: Prizm Task Question`
+- **From**: Any email address you want to test with
+- **Body**: Any response (e.g., "I'm ready to discuss my task")
+
+#### Option B: Reply to Existing Conversation
+
+Reply to any existing Prizm email with:
+- **Subject**: Keep the original subject line
+- **Body**: Your response to the question
+
+### Step 4: Monitor the Process
+
+Watch both terminals for activity:
+
+**LangGraph Server Terminal:**
+```
+INFO:werkzeug:127.0.0.1 - - [21/Jun/2025 17:18:25] "POST /process_message HTTP/1.1" 200 -
+INFO:oneNodeRemMem:✅ Email sent successfully to user@example.com
 ```
 
-## How It Works
-
-### 1. Email Reception
-- Node.js connects to Gmail via IMAP
-- Watches for emails with subject "Re: Prizm Task Question"
-- Extracts user responses from email body
-
-### 2. LangGraph Processing
-- Sends user response to Python Flask server
-- Flask server calls LangGraph `process_message()` function
-- Returns next question or completion status
-
-### 3. Email Sending
-- Sends next question via deployed GCP function
-- Uses Gmail app password authentication
-- Formats emails with Prizm branding
-
-## API Endpoints
-
-### Flask Server (http://localhost:8000)
-
-- `POST /process_message` - Process user responses
-- `POST /start_conversation` - Start new conversation
-- `GET /health` - Health check
-
-### Example Usage
-
-**Start a conversation:**
-```bash
-curl -X POST http://localhost:8000/start_conversation \
-  -H "Content-Type: application/json" \
-  -d '{"user_email": "user@example.com"}'
+**Email Watcher Terminal:**
+```
+Processing reply from: user@example.com
+User response: yes, I am ready...
+Email sent via GCP function: Prizm Task Question #2
+Processed email reply for: user@example.com
 ```
 
-**Process a response:**
-```bash
-curl -X POST http://localhost:8000/process_message \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_input": "Yes, I am ready to discuss my task",
-    "previous_state": {"conversation_history": "", "is_complete": false},
-    "user_email": "user@example.com"
-  }'
-```
+## Expected Conversation Flow
 
-## Testing
-
-### 1. Test Email Function
-```bash
-curl -X POST https://sendemail-cs64iuly6q-uc.a.run.app \
-  -H "Content-Type: application/json" \
-  -d '{"to":"test@example.com","subject":"Test","body":"Hello"}'
-```
-
-### 2. Test Flask Server
-```bash
-curl http://localhost:8000/health
-```
-
-### 3. Test Full Integration
-1. Start both services
-2. Send an email to your Gmail account with subject "Re: Prizm Task Question"
-3. Check if you receive a response
+1. **Initial Question**: "Are you ready to discuss your task?"
+2. **User Response**: "Yes, I'm ready"
+3. **Follow-up Question**: "Will you be reaching out to the contractor?"
+4. **User Response**: "Yes, I will"
+5. **Final Question**: "Do you have any concerns or questions?"
+6. **Completion**: Conversation ends with appropriate outcome
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **IMAP Connection Failed**
-   - Ensure Gmail app password is correct
-   - Check if 2FA is enabled on Gmail account
+#### 1. Flask Module Not Found
+```bash
+# Solution: Install Flask
+pip install flask flask-cors
+```
 
-2. **Flask Server Won't Start**
-   - Check if port 8000 is available
-   - Ensure all Python dependencies are installed
+#### 2. IMAP Authentication Error
+```
+IMAP error: Error: No supported authentication method(s) available
+```
+**Solution**: 
+- Check your Gmail App Password is correct
+- Ensure 2-factor authentication is enabled
+- Verify GMAIL_USER and GMAIL_APP_PASSWORD in `.env`
 
-3. **GCP Function Errors**
-   - Verify the function URL is correct
-   - Check GCP function logs
+#### 3. Email Function URL Not Found
+```
+❌ EMAIL_FUNCTION_URL not found in environment variables
+```
+**Solution**: Add the deployed GCP email function URL to your `.env` file
 
-### Logs
+#### 4. OpenAI API Key Issues
+```
+❌ OpenAI API key is not loaded
+```
+**Solution**: Verify OPENAI_API_KEY is set in your `.env` file
 
-- **Node.js logs**: Email reception and sending status
-- **Flask logs**: LangGraph processing and API calls
-- **GCP logs**: Email function execution
+### Debug Mode
 
-## Security Notes
+To see detailed logs, the servers run in debug mode by default. You can see:
+- HTTP requests and responses
+- LangGraph processing steps
+- Email sending confirmations
+- IMAP connection status
 
-- Gmail app passwords are more secure than OAuth2 for this use case
-- All sensitive data should be in environment variables
-- Consider rate limiting for production use
-- Monitor email sending quotas
+## Testing Scenarios
 
-## Production Deployment
+### Scenario 1: New User Conversation
+1. Send email with subject "Re: Prizm Task Question"
+2. System should send first question
+3. Reply to the question
+4. System should continue conversation
 
-For production, consider:
-- Running services as systemd services
-- Using PM2 for Node.js process management
-- Setting up proper logging and monitoring
-- Implementing error recovery and retry logic
-- Using a proper database for conversation state persistence 
+### Scenario 2: Conversation Completion
+1. Reply to questions until conversation completes
+2. System should send completion message
+3. Conversation should end with TASK_PROGRESSING or TASK_ESCALATION
+
+### Scenario 3: Multiple Users
+1. Test with different email addresses
+2. Each user should have independent conversation state
+3. Conversations should not interfere with each other
+
+## Monitoring and Logs
+
+### Key Log Messages to Watch For:
+- `✅ Email sent successfully` - Email sent via GCP function
+- `Processing reply from:` - Email reply detected
+- `IMAP search date:` - Email checking cycle
+- `No new Prizm email replies` - No new emails found
+- `Processed email reply for:` - Email processed successfully
+
+### Health Check
+Test the server health:
+```bash
+curl http://localhost:8000/health
+```
+Expected response: `{"status": "healthy", "service": "langgraph-email-integration"}`
+
+## Stopping the System
+
+1. **Stop Email Watcher**: Press `Ctrl+C` in the Node.js terminal
+2. **Stop LangGraph Server**: Press `Ctrl+C` in the Python terminal
+
+Both services will shut down gracefully and close their connections.
+
+## Production Considerations
+
+For production deployment:
+1. Use a production WSGI server (Gunicorn, uWSGI)
+2. Set up proper logging
+3. Use environment-specific configuration
+4. Implement proper error handling and retries
+5. Consider using a message queue for email processing
+6. Set up monitoring and alerting
+
+## Files Overview
+
+- `langgraph_server.py` - Flask server exposing LangGraph API
+- `email_langgraph_integration.js` - Node.js email watcher
+- `oneNodeRemMem.py` - Core LangGraph conversation logic
+- `requirements.txt` - Python dependencies
+- `package.json` - Node.js dependencies
+- `.env` - Environment configuration 
