@@ -121,8 +121,11 @@ function checkEmails(conversationStates, processedEmails) {
             simpleParser(stream, async (err, parsed) => {
               if (err) throw err;
               
-              // Create a unique identifier for this email
-              const emailId = `${parsed.messageId || parsed.date}-${parsed.from.text}`;
+              // Create a unique identifier for this email using multiple fields
+              const emailId = `${parsed.messageId || 'no-id'}-${parsed.date || 'no-date'}-${parsed.from.text}-${parsed.subject || 'no-subject'}`;
+              
+              console.log('Email ID:', emailId);
+              console.log('Processed emails count:', processedEmails.size);
               
               // Check if we've already processed this email
               if (processedEmails.has(emailId)) {
@@ -187,6 +190,7 @@ Prizm Real Estate Concierge Service`
               // Mark this email as processed
               processedEmails.add(emailId);
               console.log('Processed email reply for:', userEmail);
+              console.log('Total processed emails:', processedEmails.size);
             });
           });
         });
