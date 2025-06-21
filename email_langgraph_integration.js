@@ -101,12 +101,11 @@ function checkEmails(conversationStates, processedEmails) {
       console.log('IMAP search date:', imapDate);
       
       // Search for unread emails that are replies to our Prizm emails
-      // Use a more specific search to avoid duplicates - only look for recent emails
+      // Use a simpler search to avoid unsupported operators
       const searchCriteria = [
         'UNSEEN', 
         ['SUBJECT', 'Re: Prizm Task Question'], 
-        ['SINCE', imapDate],
-        ['NOT', 'FROM', 'foilboi808@gmail.com'] // Don't process our own sent emails
+        ['SINCE', imapDate]
       ];
       
       console.log('Search criteria:', searchCriteria);
@@ -153,6 +152,12 @@ function checkEmails(conversationStates, processedEmails) {
               
               // Extract user's email address
               const userEmail = parsed.from.text.match(/<(.+)>/)?.[1] || parsed.from.text;
+              
+              // Skip processing emails from our own address
+              if (userEmail === process.env.GMAIL_USER) {
+                console.log('Skipping email from our own address:', userEmail);
+                return;
+              }
               
               // Extract the user's response from the email body
               const userResponse = parsed.text || parsed.html || '';
