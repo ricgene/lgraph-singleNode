@@ -101,7 +101,17 @@ function checkEmails(conversationStates, processedEmails) {
       console.log('IMAP search date:', imapDate);
       
       // Search for unread emails that are replies to our Prizm emails
-      imap.search(['UNSEEN', ['SUBJECT', 'Re: Prizm Task Question'], ['SINCE', imapDate]], (err, results) => {
+      // Use a more specific search to avoid duplicates - only look for recent emails
+      const searchCriteria = [
+        'UNSEEN', 
+        ['SUBJECT', 'Re: Prizm Task Question'], 
+        ['SINCE', imapDate],
+        ['NOT', 'FROM', 'foilboi808@gmail.com'] // Don't process our own sent emails
+      ];
+      
+      console.log('Search criteria:', searchCriteria);
+      
+      imap.search(searchCriteria, (err, results) => {
         if (err) throw err;
         
         if (results.length === 0) {
@@ -112,7 +122,11 @@ function checkEmails(conversationStates, processedEmails) {
 
         console.log(`Found ${results.length} new Prizm email replies`);
 
+        // Use markSeen to prevent re-processing
         const fetch = imap.fetch(results, { bodies: '', markSeen: true });
+        
+        // Track processed messages in this fetch session
+        const processedInSession = new Set();
         
         fetch.on('message', (msg, seqno) => {
           console.log('Processing message #', seqno);
@@ -126,12 +140,16 @@ function checkEmails(conversationStates, processedEmails) {
               
               console.log('Email ID:', emailId);
               console.log('Processed emails count:', processedEmails.size);
+              console.log('Processed in session:', processedInSession.size);
               
-              // Check if we've already processed this email
-              if (processedEmails.has(emailId)) {
+              // Check if we've already processed this email (global or in this session)
+              if (processedEmails.has(emailId) || processedInSession.has(emailId)) {
                 console.log('Skipping already processed email:', emailId);
                 return;
               }
+              
+              // Mark as processed in this session immediately
+              processedInSession.add(emailId);
               
               // Extract user's email address
               const userEmail = parsed.from.text.match(/<(.+)>/)?.[1] || parsed.from.text;
@@ -187,7 +205,7 @@ Prizm Real Estate Concierge Service`
                 );
               }
               
-              // Mark this email as processed
+              // Mark this email as processed globally
               processedEmails.add(emailId);
               console.log('Processed email reply for:', userEmail);
               console.log('Total processed emails:', processedEmails.size);
