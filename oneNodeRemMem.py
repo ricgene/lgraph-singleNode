@@ -13,6 +13,7 @@ from langgraph.prebuilt import ToolNode
 import logging
 from langchain_core.tracers import ConsoleCallbackHandler
 from langchain_core.tracers.langchain import LangChainTracer
+import requests
 # from langchain_core.callbacks import get_callback_manager  # <-- removed
 
 # Set up logging
@@ -50,6 +51,48 @@ def test_api_key():
         logger.error("❌ OpenAI API key is not loaded")
         logger.error("Please set OPENAI_API_KEY in your .env or environment.")
 
+def send_email(recipient_email: str, subject: str, body: str) -> bool:
+    """
+    Send an email by calling the deployed GCP email function.
+    
+    Args:
+        recipient_email: Email address to send to
+        subject: Email subject
+        body: Email body text
+        
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    try:
+        # Get the deployed email function URL from environment
+        email_function_url = os.getenv("EMAIL_FUNCTION_URL")
+        
+        if not email_function_url:
+            logger.error("❌ EMAIL_FUNCTION_URL not found in environment variables")
+            logger.error("Please set EMAIL_FUNCTION_URL in your .env file")
+            return False
+        
+        # Prepare the payload for the email function
+        payload = {
+            "to": recipient_email,
+            "subject": subject,
+            "body": body
+        }
+        
+        # Call the deployed email function
+        response = requests.post(email_function_url, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            logger.info(f"✅ Email sent successfully to {recipient_email}")
+            return True
+        else:
+            logger.error(f"❌ Email function returned status {response.status_code}: {response.text}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"❌ Error sending email: {str(e)}")
+        return False
+
 test_api_key()
 
 # Define the state structure
@@ -59,10 +102,11 @@ class DeckState:
         self.all_info_collected = False
         self.is_complete = False
         self.turn_count = 0
+        self.user_email = ""  # Add email field to state
         logger.info(f"Initialized DeckState with attributes: {dir(self)}")
 
     def __str__(self):
-        return f"DeckState(conversation_history={self.conversation_history}, is_complete={self.is_complete}, turn_count={self.turn_count})"
+        return f"DeckState(conversation_history={self.conversation_history}, is_complete={self.is_complete}, turn_count={self.turn_count}, user_email={self.user_email})"
 
     def __repr__(self):
         return self.__str__()
@@ -99,6 +143,7 @@ def process_message(input_dict):
     The input dictionary should contain:
     - user_input: The user's message
     - previous_state: The previous state (None for first call)
+    - user_email: The user's email address (optional, can be set in first call)
     """
     print("\n=== DEBUG: Starting process_message ===")
     print(f"Input dictionary: {input_dict}")
@@ -108,19 +153,23 @@ def process_message(input_dict):
     if isinstance(input_dict, dict):
         user_input = input_dict.get('user_input', '')
         previous_state = input_dict.get('previous_state', None)
+        user_email = input_dict.get('user_email', '')
     else:
         # If input_dict is a DeckState object
         user_input = getattr(input_dict, 'user_input', '')
         previous_state = getattr(input_dict, 'previous_state', None)
+        user_email = getattr(input_dict, 'user_email', '')
     
     print(f"\nInitial state:")
     print(f"User input: {user_input}")
+    print(f"User email: {user_email}")
     print(f"Previous state: {previous_state}")
     print(f"Previous state type: {type(previous_state)}")
     
     # Initialize or use previous state
     if previous_state is None:
         state = DeckState()
+        state.user_email = user_email  # Set email from input
         print("\nCreated new state")
         print(f"New state attributes: {dir(state)}")
     else:
@@ -128,12 +177,15 @@ def process_message(input_dict):
         if isinstance(previous_state, dict):
             state.conversation_history = previous_state.get('conversation_history', '')
             state.is_complete = previous_state.get('is_complete', False)
+            state.user_email = previous_state.get('user_email', user_email)
         else:
             state.conversation_history = getattr(previous_state, 'conversation_history', '')
             state.is_complete = getattr(previous_state, 'is_complete', False)
+            state.user_email = getattr(previous_state, 'user_email', user_email)
         print(f"\nRestored state with conversation history: {state.conversation_history}")
         print(f"Restored state attributes: {dir(state)}")
         print(f"Restored state is_complete: {state.is_complete}")
+        print(f"Restored state user_email: {state.user_email}")
     
     # Count turns by counting Q&A pairs in conversation history
     turn_count = state.conversation_history.count("Question:")
@@ -142,11 +194,22 @@ def process_message(input_dict):
     # Check if we've reached the maximum number of turns
     if turn_count >= 7:
         state.is_complete = True
+        final_message = "Thank you for your time. We've reached the maximum number of turns for this conversation."
+        
+        # Send final email if we have user's email
+        if state.user_email:
+            send_email(
+                state.user_email,
+                "Prizm Task Conversation Complete",
+                final_message
+            )
+        
         return {
-            "question": "Thank you for your time. We've reached the maximum number of turns for this conversation.",
+            "question": final_message,
             "conversation_history": state.conversation_history,
             "is_complete": True,
-            "completion_state": "OTHER"
+            "completion_state": "OTHER",
+            "user_email": state.user_email
         }
     
     # Build system prompt
@@ -226,6 +289,26 @@ def process_message(input_dict):
     elif "TASK_ESCALATION" in response_text:
         completion_state = "TASK_ESCALATION"
     
+    # Send email with the question if we have user's email and this is not the final message
+    if state.user_email and question and not is_complete:
+        email_body = f"""Hello!
+
+Helen from Prizm here. I have a question for you about your task:
+
+{question}
+
+Please reply to this email with your response.
+
+Best regards,
+Helen
+Prizm Real Estate Concierge Service"""
+        
+        send_email(
+            state.user_email,
+            f"Prizm Task Question #{turn_count + 1}",
+            email_body
+        )
+    
     print("\nFinal state:")
     print(f"Question: {question}")
     print(f"Learned: {learned}")
@@ -240,7 +323,8 @@ def process_message(input_dict):
         "question": question,
         "conversation_history": state.conversation_history,
         "is_complete": is_complete,
-        "completion_state": completion_state
+        "completion_state": completion_state,
+        "user_email": state.user_email
     }
 
 # Build the graph
@@ -260,10 +344,17 @@ def run_example():
     """Example of how to use the process_message function"""
     print("\n=== DEBUG: Starting Conversation ===")
     
+    # Get user's email address
+    user_email = input("Please enter your email address: ").strip()
+    if not user_email:
+        print("No email provided. Email functionality will be disabled.")
+        user_email = ""
+    
     print("----------get question 1--------")
     first_input = {
         "user_input": "",
-        "previous_state": None
+        "previous_state": None,
+        "user_email": user_email
     }
     print("First call input:", json.dumps(first_input, indent=2))
     result = process_message(first_input)
@@ -280,7 +371,8 @@ def run_example():
         "user_input": user_input,
         "previous_state": {
             "conversation_history": result["conversation_history"],
-            "all_info_collected": False
+            "all_info_collected": False,
+            "user_email": result["user_email"]
         }
     }
     print("\n=== DEBUG: Processing First Response ===")
@@ -302,7 +394,8 @@ def run_example():
             "user_input": user_input,
             "previous_state": {
                 "conversation_history": result["conversation_history"],
-                "all_info_collected": False
+                "all_info_collected": False,
+                "user_email": result["user_email"]
             }
         }
         print("Next call input:", json.dumps(next_input, indent=2))

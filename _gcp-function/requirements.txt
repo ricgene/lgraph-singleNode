@@ -1,4 +1,0 @@
-langgraph-sdk
-python-dotenv
-flask>=2.0.0
-functions-framework==3.*
