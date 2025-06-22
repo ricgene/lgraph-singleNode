@@ -1,7 +1,7 @@
 {
   "richard.genet@gmail.com": {
-    "conversation_history": "\nQuestion: Great! Are you ready to discuss the details of your home task now?\nLearned: The customer will contact the contractor today.\nQuestion: That's great! Do you have any concerns or questions about the task that you would like to discuss?\nLearned: The customer is ready to discuss the task and will contact the contractor today.\nQuestion: I'm glad to hear that you will be contacting the contractor. Do you have any concerns or questions about the task that you would like to discuss?\nLearned: The customer has confirmed they will contact the contractor today.",
-    "is_complete": false,
+    "conversation_history": "\nQuestion: Great! Are you ready to discuss the details of your home task now?\nLearned: The customer will contact the contractor today.\nQuestion: That's great! Do you have any concerns or questions about the task that you would like to discuss?\nLearned: The customer is ready to discuss the task and will contact the contractor today.\nQuestion: I'm glad to hear that you will be contacting the contractor. Do you have any concerns or questions about the task that you would like to discuss?\nLearned: The customer has confirmed they will contact the contractor today.\nLearned: The customer has no concerns or questions and is ready to move forward with the task.\n\nThank you for selecting Prizm, have a great rest of your day!\n\nTASK_PROGRESSING",
+    "is_complete": true,
     "user_email": "richard.genet@gmail.com"
   }
 }

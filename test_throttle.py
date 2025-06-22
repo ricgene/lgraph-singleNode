@@ -52,6 +52,8 @@ def test_server_throttle():
     """Test throttling with the actual server"""
     print(f"\n🔗 Testing Server Throttle Integration")
     print("=" * 50)
+    print("⚠️  WARNING: This test will send actual emails to richard.genet@gmail.com")
+    print("=" * 50)
     
     server_url = "http://localhost:8000"
     
@@ -59,7 +61,7 @@ def test_server_throttle():
     test_data = {
         "user_input": "Yes, I am ready to discuss my task",
         "previous_state": None,
-        "user_email": "throttle.test@example.com"
+        "user_email": "richard.genet@gmail.com"  # Use real email instead of test address
     }
     
     try:
