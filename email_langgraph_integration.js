@@ -292,238 +292,203 @@ async function processUserResponse(userEmail, userResponse, conversationState) {
   }
 }
 
-// Function to check for new emails and process them
-function checkEmails(conversationStates, processedEmails) {
-  const imap = createImapConnection();
-
-  imap.once('ready', () => {
-    imap.openBox('INBOX', false, (err, box) => {
-      if (err) throw err;
-      
-      // Use today's date in DD-MMM-YYYY format for SINCE
-      const today = new Date();
-      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      const day = today.getDate();
-      const month = months[today.getMonth()];
-      const year = today.getFullYear();
-      const imapDate = `${day}-${month}-${year}`;
-      console.log('IMAP search date:', imapDate);
-      
-      // More specific search criteria to avoid duplicates
-      // Only look for UNSEEN emails that are replies to our specific questions
-      const searchCriteria = [
-        'UNSEEN', 
-        ['SUBJECT', 'Re: Prizm Task Question'], 
-        ['SINCE', imapDate]
-      ];
-      
-      console.log('Search criteria:', searchCriteria);
-      
-      imap.search(searchCriteria, (err, results) => {
+// Function to process emails found in a specific folder
+function processEmailsInFolder(results, folderName) {
+  // Use markSeen to prevent re-processing and include UIDs
+  const fetch = imap.fetch(results, { 
+    bodies: '', 
+    markSeen: true, 
+    struct: true,
+    envelope: true,
+    uid: true  // This ensures UIDs are included
+  });
+  
+  // Track processed messages in this fetch session
+  const processedInSession = new Set();
+  
+  fetch.on('message', (msg, seqno) => {
+    console.log(`Processing message #${seqno} from folder: ${folderName}`);
+    
+    // Get the UID for this message
+    const uid = msg.uid;
+    console.log('Message UID:', uid);
+    
+    msg.on('body', async (stream) => {
+      simpleParser(stream, async (err, parsed) => {
         if (err) throw err;
         
-        if (results.length === 0) {
-          console.log('No new Prizm email replies');
-          imap.end();
+        // Use IMAP UID as the primary deduplication key (most reliable)
+        // If UID is undefined, fall back to message ID + timestamp
+        const emailUid = uid ? uid.toString() : 
+          `${parsed.messageId || 'no-message-id'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        console.log('=== EMAIL PROCESSING DEBUG ===');
+        console.log('Email UID:', emailUid);
+        console.log('Message ID:', parsed.messageId);
+        console.log('Date:', parsed.date);
+        console.log('From:', parsed.from?.text);
+        console.log('Subject:', parsed.subject);
+        console.log('Folder:', folderName);
+        console.log('IMAP UID:', uid);
+        console.log('Processed emails count:', processedEmails.size);
+        console.log('Processed in session:', processedInSession.size);
+        console.log('Already processed globally:', processedEmails.has(emailUid));
+        console.log('Already processed in session:', processedInSession.has(emailUid));
+        console.log('Currently being processed:', isEmailBeingProcessed(emailUid));
+        console.log('================================');
+        
+        // Check if we've already processed this email (global or in this session)
+        if (processedEmails.has(emailUid) || processedInSession.has(emailUid)) {
+          console.log('Skipping already processed email UID:', emailUid);
           return;
         }
-
-        console.log(`Found ${results.length} new Prizm email replies`);
-
-        // Use markSeen to prevent re-processing and include UIDs
-        const fetch = imap.fetch(results, { 
-          bodies: '', 
-          markSeen: true, 
-          struct: true,
-          envelope: true,
-          uid: true  // This ensures UIDs are included
-        });
         
-        // Track processed messages in this fetch session
-        const processedInSession = new Set();
+        // Check if this email is currently being processed (race condition prevention)
+        if (isEmailBeingProcessed(emailUid)) {
+          console.log('Skipping email UID currently being processed:', emailUid);
+          return;
+        }
         
-        fetch.on('message', (msg, seqno) => {
-          console.log('Processing message #', seqno);
+        // Check if email is older than watcher start time
+        const emailDate = parsed.date ? new Date(parsed.date).getTime() : 0;
+        if (emailDate && emailDate < watcherStartTime) {
+          // Move this email to Trash and log it
+          imap.addFlags(msg.attributes.uid, '\\Deleted', (err) => {
+            if (err) {
+              console.error('❌ Failed to mark old email for deletion:', err);
+            } else {
+              console.log('🗑️ Deleted old email (before watcher start):', parsed.subject, parsed.date, parsed.messageId);
+            }
+          });
+          return; // Skip processing this email
+        }
+        
+        // Mark as processed in this session immediately
+        processedInSession.add(emailUid);
+        console.log(`✅ Marked email as processed in session: ${emailUid}`);
+        
+        // Mark as currently processing to prevent race conditions
+        markEmailAsProcessing(emailUid);
+        console.log(`🔒 Marked email as processing: ${emailUid}`);
+        
+        try {
+          // Extract user's email address
+          const userEmail = parsed.from.text.match(/<(.+)>/)?.[1] || parsed.from.text;
           
-          // Get the UID for this message
-          const uid = msg.uid;
-          console.log('Message UID:', uid);
+          // Skip processing emails from our own address
+          if (userEmail === process.env.GMAIL_USER) {
+            console.log('Skipping email from our own address:', userEmail);
+            return;
+          }
           
-          msg.on('body', async (stream) => {
-            simpleParser(stream, async (err, parsed) => {
-              if (err) throw err;
-              
-              // Use IMAP UID as the primary deduplication key (most reliable)
-              // If UID is undefined, fall back to message ID + timestamp
-              const emailUid = uid ? uid.toString() : 
-                `${parsed.messageId || 'no-message-id'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              
-              console.log('=== EMAIL PROCESSING DEBUG ===');
-              console.log('Email UID:', emailUid);
-              console.log('Message ID:', parsed.messageId);
-              console.log('Date:', parsed.date);
-              console.log('From:', parsed.from?.text);
-              console.log('Subject:', parsed.subject);
-              console.log('IMAP UID:', uid);
-              console.log('Processed emails count:', processedEmails.size);
-              console.log('Processed in session:', processedInSession.size);
-              console.log('Already processed globally:', processedEmails.has(emailUid));
-              console.log('Already processed in session:', processedInSession.has(emailUid));
-              console.log('Currently being processed:', isEmailBeingProcessed(emailUid));
-              console.log('================================');
-              
-              // Check if we've already processed this email (global or in this session)
-              if (processedEmails.has(emailUid) || processedInSession.has(emailUid)) {
-                console.log('Skipping already processed email UID:', emailUid);
-                return;
-              }
-              
-              // Check if this email is currently being processed (race condition prevention)
-              if (isEmailBeingProcessed(emailUid)) {
-                console.log('Skipping email UID currently being processed:', emailUid);
-                return;
-              }
-              
-              // Check if email is older than watcher start time
-              const emailDate = parsed.date ? new Date(parsed.date).getTime() : 0;
-              if (emailDate && emailDate < watcherStartTime) {
-                // Move this email to Trash and log it
-                imap.addFlags(msg.attributes.uid, '\\Deleted', (err) => {
-                  if (err) {
-                    console.error('❌ Failed to mark old email for deletion:', err);
-                  } else {
-                    console.log('🗑️ Deleted old email (before watcher start):', parsed.subject, parsed.date, parsed.messageId);
-                  }
-                });
-                return; // Skip processing this email
-              }
-              
-              // Mark as processed in this session immediately
-              processedInSession.add(emailUid);
-              console.log(`✅ Marked email as processed in session: ${emailUid}`);
-              
-              // Mark as currently processing to prevent race conditions
-              markEmailAsProcessing(emailUid);
-              console.log(`🔒 Marked email as processing: ${emailUid}`);
-              
-              try {
-                // Extract user's email address
-                const userEmail = parsed.from.text.match(/<(.+)>/)?.[1] || parsed.from.text;
-                
-                // Skip processing emails from our own address
-                if (userEmail === process.env.GMAIL_USER) {
-                  console.log('Skipping email from our own address:', userEmail);
-                  return;
-                }
-                
-                // Check if user has been processed recently
-                if (isUserRecentlyProcessed(userEmail)) {
-                  return;
-                }
-                
-                // Extract the user's response from the email body
-                // Remove quoted text and email headers to get just the user's response
-                let userResponse = parsed.text || parsed.html || '';
-                
-                // Remove quoted text (lines starting with >)
-                userResponse = userResponse.split('\n')
-                  .filter(line => !line.trim().startsWith('>'))
-                  .join('\n');
-                
-                // Remove common email headers and signatures
-                userResponse = userResponse.replace(/On .+ wrote:.*$/s, '');
-                userResponse = userResponse.replace(/Best regards,.*$/s, '');
-                userResponse = userResponse.replace(/Helen.*$/s, '');
-                userResponse = userResponse.replace(/Prizm.*$/s, '');
-                userResponse = userResponse.replace(/Real Estate Concierge Service.*$/s, '');
-                userResponse = userResponse.replace(/Please reply to this email.*$/s, '');
-                
-                // Remove any remaining quoted text patterns
-                userResponse = userResponse.replace(/^>.*$/gm, '');
-                userResponse = userResponse.replace(/^On .+ at .+ .+ wrote:$/gm, '');
-                
-                // Clean up the response - remove extra whitespace and empty lines
-                userResponse = userResponse
-                  .split('\n')
-                  .map(line => line.trim())
-                  .filter(line => line.length > 0)
-                  .join('\n')
-                  .trim();
-                
-                // If the response is empty after cleaning, use a fallback
-                if (!userResponse || userResponse.length === 0) {
-                  userResponse = parsed.text || parsed.html || '';
-                  // Just take the first few lines as a fallback
-                  userResponse = userResponse.split('\n').slice(0, 3).join('\n').trim();
-                }
-                
-                // Check if this email content is a duplicate
-                if (isEmailContentProcessed(userEmail, userResponse)) {
-                  console.log(`🚫 Skipping duplicate email content from ${userEmail}`);
-                  return;
-                }
-                
-                console.log('Processing reply from:', userEmail);
-                console.log('User response:', userResponse.substring(0, 100) + '...');
-                
-                // Get or create conversation state for this user
-                if (!conversationStates[userEmail]) {
-                  // Try to load existing state from storage
-                  const existingState = await loadConversationState(userEmail);
-                  if (existingState) {
-                    conversationStates[userEmail] = existingState;
-                    console.log(`✅ Loaded existing conversation state for ${userEmail}`);
-                  } else {
-                    conversationStates[userEmail] = {
-                      conversation_history: "",
-                      is_complete: false,
-                      user_email: userEmail
-                    };
-                    console.log(`✅ Created new conversation state for ${userEmail}`);
-                  }
-                }
-                
-                // Process the user's response through LangGraph
-                const result = await processUserResponse(userEmail, userResponse, conversationStates[userEmail]);
-                
-                // Update conversation state
-                conversationStates[userEmail] = {
-                  conversation_history: result.conversation_history,
-                  is_complete: result.is_complete,
-                  user_email: userEmail
-                };
-                
-                // Save conversation state to storage
-                await saveConversationState(userEmail, conversationStates[userEmail]);
-                
-                // DOUBLE-CHECK: Verify email content hasn't been processed by another instance
-                if (isEmailContentProcessed(userEmail, userResponse)) {
-                  console.log(`🚫 DOUBLE-CHECK: Email content already processed by another instance for ${userEmail}`);
-                  return;
-                }
-                
-                // MARK EMAIL CONTENT AS PROCESSED AFTER DOUBLE-CHECK
-                markEmailContentProcessed(userEmail, userResponse);
-                
-                // Send the next question if conversation is not complete
-                if (!result.is_complete && result.question) {
-                  // Check throttle before sending email
-                  const waitTime = enforceStrictThrottle(userEmail);
-                  if (waitTime > 0) {
-                    console.log(`⏳ Waiting ${waitTime}ms before sending email to ${userEmail}`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
-                  }
-                  
-                  // FINAL CHECK: One more verification before sending
-                  if (isEmailContentProcessed(userEmail, userResponse)) {
-                    console.log(`🚫 FINAL CHECK: Email content already processed before sending to ${userEmail}`);
-                    return;
-                  }
-                  
-                  await sendEmailViaGCP(
-                    userEmail,
-                    `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`,
-                    `Hello!
+          // Check if user has been processed recently
+          if (isUserRecentlyProcessed(userEmail)) {
+            return;
+          }
+          
+          // Extract the user's response from the email body
+          // Remove quoted text and email headers to get just the user's response
+          let userResponse = parsed.text || parsed.html || '';
+          
+          // Remove quoted text (lines starting with >)
+          userResponse = userResponse.split('\n')
+            .filter(line => !line.trim().startsWith('>'))
+            .join('\n');
+          
+          // Remove common email headers and signatures
+          userResponse = userResponse.replace(/On .+ wrote:.*$/s, '');
+          userResponse = userResponse.replace(/Best regards,.*$/s, '');
+          userResponse = userResponse.replace(/Helen.*$/s, '');
+          userResponse = userResponse.replace(/Prizm.*$/s, '');
+          userResponse = userResponse.replace(/Real Estate Concierge Service.*$/s, '');
+          userResponse = userResponse.replace(/Please reply to this email.*$/s, '');
+          
+          // Remove any remaining quoted text patterns
+          userResponse = userResponse.replace(/^>.*$/gm, '');
+          userResponse = userResponse.replace(/^On .+ at .+ .+ wrote:$/gm, '');
+          
+          // Clean up the response - remove extra whitespace and empty lines
+          userResponse = userResponse
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .join('\n')
+            .trim();
+          
+          // If the response is empty after cleaning, use a fallback
+          if (!userResponse || userResponse.length === 0) {
+            userResponse = parsed.text || parsed.html || '';
+            // Just take the first few lines as a fallback
+            userResponse = userResponse.split('\n').slice(0, 3).join('\n').trim();
+          }
+          
+          // Check if this email content is a duplicate
+          if (isEmailContentProcessed(userEmail, userResponse)) {
+            console.log(`🚫 Skipping duplicate email content from ${userEmail}`);
+            return;
+          }
+          
+          console.log('Processing reply from:', userEmail);
+          console.log('User response:', userResponse.substring(0, 100) + '...');
+          
+          // Get or create conversation state for this user
+          if (!conversationStates[userEmail]) {
+            // Try to load existing state from storage
+            const existingState = await loadConversationState(userEmail);
+            if (existingState) {
+              conversationStates[userEmail] = existingState;
+              console.log(`✅ Loaded existing conversation state for ${userEmail}`);
+            } else {
+              conversationStates[userEmail] = {
+                conversation_history: "",
+                is_complete: false,
+                user_email: userEmail
+              };
+              console.log(`✅ Created new conversation state for ${userEmail}`);
+            }
+          }
+          
+          // Process the user's response through LangGraph
+          const result = await processUserResponse(userEmail, userResponse, conversationStates[userEmail]);
+          
+          // Update conversation state
+          conversationStates[userEmail] = {
+            conversation_history: result.conversation_history,
+            is_complete: result.is_complete,
+            user_email: userEmail
+          };
+          
+          // Save conversation state to storage
+          await saveConversationState(userEmail, conversationStates[userEmail]);
+          
+          // DOUBLE-CHECK: Verify email content hasn't been processed by another instance
+          if (isEmailContentProcessed(userEmail, userResponse)) {
+            console.log(`🚫 DOUBLE-CHECK: Email content already processed by another instance for ${userEmail}`);
+            return;
+          }
+          
+          // MARK EMAIL CONTENT AS PROCESSED AFTER DOUBLE-CHECK
+          markEmailContentProcessed(userEmail, userResponse);
+          
+          // Send the next question if conversation is not complete
+          if (!result.is_complete && result.question) {
+            // Check throttle before sending email
+            const waitTime = enforceStrictThrottle(userEmail);
+            if (waitTime > 0) {
+              console.log(`⏳ Waiting ${waitTime}ms before sending email to ${userEmail}`);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+            
+            // FINAL CHECK: One more verification before sending
+            if (isEmailContentProcessed(userEmail, userResponse)) {
+              console.log(`🚫 FINAL CHECK: Email content already processed before sending to ${userEmail}`);
+              return;
+            }
+            
+            await sendEmailViaGCP(
+              userEmail,
+              `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`,
+              `Hello!
 
 Helen from Prizm here. I have a question for you about your task:
 
@@ -534,59 +499,166 @@ Please reply to this email with your response.
 Best regards,
 Helen
 Prizm Real Estate Concierge Service`
-                  );
-                  
-                  // Update last email sent time
-                  updateLastEmailSentTime(userEmail);
-                } else if (result.is_complete) {
-                  // Check throttle before sending completion email
-                  const waitTime = enforceStrictThrottle(userEmail);
-                  if (waitTime > 0) {
-                    console.log(`⏳ Waiting ${waitTime}ms before sending completion email to ${userEmail}`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
-                  }
-                  
-                  // FINAL CHECK: One more verification before sending
-                  if (isEmailContentProcessed(userEmail, userResponse)) {
-                    console.log(`🚫 FINAL CHECK: Email content already processed before sending completion to ${userEmail}`);
-                    return;
-                  }
-                  
-                  // Send completion message
-                  await sendEmailViaGCP(
-                    userEmail,
-                    "Prizm Task Conversation Complete",
-                    "Thank you for your time. We've completed our conversation about your task."
-                  );
-                  
-                  // Update last email sent time
-                  updateLastEmailSentTime(userEmail);
-                }
-                
-                // Mark this email as processed globally
-                processedEmails.add(emailUid);
-                console.log('Processed email reply for:', userEmail);
-                console.log('Total processed emails:', processedEmails.size);
-                
-              } finally {
-                // Always mark as finished processing, even if there was an error
-                markEmailAsFinished(emailUid);
-                console.log(`✅ Marked email as finished processing: ${emailUid}`);
-              }
-            });
-          });
-        });
-
-        fetch.once('error', (err) => {
-          console.error('Fetch error:', err);
-        });
-
-        fetch.once('end', () => {
-          console.log('Done fetching all messages');
-          imap.end();
-        });
+            );
+            
+            // Update last email sent time
+            updateLastEmailSentTime(userEmail);
+          } else if (result.is_complete) {
+            // Check throttle before sending completion email
+            const waitTime = enforceStrictThrottle(userEmail);
+            if (waitTime > 0) {
+              console.log(`⏳ Waiting ${waitTime}ms before sending completion email to ${userEmail}`);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+            
+            // FINAL CHECK: One more verification before sending
+            if (isEmailContentProcessed(userEmail, userResponse)) {
+              console.log(`🚫 FINAL CHECK: Email content already processed before sending completion to ${userEmail}`);
+              return;
+            }
+            
+            // Send completion message
+            await sendEmailViaGCP(
+              userEmail,
+              "Prizm Task Conversation Complete",
+              "Thank you for your time. We've completed our conversation about your task."
+            );
+            
+            // Update last email sent time
+            updateLastEmailSentTime(userEmail);
+          }
+          
+          // Mark this email as processed globally
+          processedEmails.add(emailUid);
+          console.log('Processed email reply for:', userEmail);
+          console.log('Total processed emails:', processedEmails.size);
+          
+        } finally {
+          // Always mark as finished processing, even if there was an error
+          markEmailAsFinished(emailUid);
+          console.log(`✅ Marked email as finished processing: ${emailUid}`);
+        }
       });
     });
+  });
+  
+  fetch.once('error', (err) => {
+    console.error('Fetch error:', err);
+  });
+  
+  fetch.once('end', () => {
+    console.log(`Done fetching all messages from ${folderName}`);
+  });
+}
+
+// Function to check for new emails and process them
+function checkEmails(conversationStates, processedEmails) {
+  const imap = createImapConnection();
+
+  imap.once('ready', () => {
+    // Search across all Gmail folders (INBOX, Social, Promotions, etc.)
+    const searchAllFolders = async () => {
+      try {
+        // Get list of all folders
+        imap.getBoxes((err, boxes) => {
+          if (err) {
+            console.error('Error getting folders:', err);
+            imap.end();
+            return;
+          }
+          
+          const folders = [];
+          const addFolders = (boxList, prefix = '') => {
+            for (const [name, box] of Object.entries(boxList)) {
+              if (box.children) {
+                addFolders(box.children, prefix + name + '.');
+              } else {
+                folders.push(prefix + name);
+              }
+            }
+          };
+          addFolders(boxes);
+          
+          console.log('Available folders:', folders);
+          
+          // Search in each folder
+          let totalFound = 0;
+          let foldersChecked = 0;
+          
+          const checkFolder = (folderName) => {
+            imap.openBox(folderName, false, (err, box) => {
+              if (err) {
+                console.log(`Could not open folder ${folderName}:`, err.message);
+                foldersChecked++;
+                if (foldersChecked >= folders.length) {
+                  if (totalFound === 0) {
+                    console.log('No new Prizm email replies found in any folder');
+                  }
+                  imap.end();
+                }
+                return;
+              }
+              
+              // Use today's date in DD-MMM-YYYY format for SINCE
+              const today = new Date();
+              const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+              const day = today.getDate();
+              const month = months[today.getMonth()];
+              const year = today.getFullYear();
+              const imapDate = `${day}-${month}-${year}`;
+              
+              // Search criteria
+              const searchCriteria = [
+                'UNSEEN', 
+                ['SUBJECT', 'Re: Prizm Task Question'], 
+                ['SINCE', imapDate]
+              ];
+              
+              console.log(`Searching in folder: ${folderName}`);
+              console.log('Search criteria:', searchCriteria);
+              
+              imap.search(searchCriteria, (err, results) => {
+                if (err) {
+                  console.error(`Error searching in ${folderName}:`, err);
+                  foldersChecked++;
+                  if (foldersChecked >= folders.length) {
+                    if (totalFound === 0) {
+                      console.log('No new Prizm email replies found in any folder');
+                    }
+                    imap.end();
+                  }
+                  return;
+                }
+                
+                if (results.length > 0) {
+                  console.log(`Found ${results.length} new Prizm email replies in ${folderName}`);
+                  totalFound += results.length;
+                  
+                  // Process the emails found in this folder
+                  processEmailsInFolder(results, folderName);
+                }
+                
+                foldersChecked++;
+                if (foldersChecked >= folders.length) {
+                  if (totalFound === 0) {
+                    console.log('No new Prizm email replies found in any folder');
+                  }
+                  imap.end();
+                }
+              });
+            });
+          };
+          
+          // Start checking folders
+          folders.forEach(checkFolder);
+        });
+      } catch (error) {
+        console.error('Error in searchAllFolders:', error);
+        imap.end();
+      }
+    };
+    
+    searchAllFolders();
   });
 
   imap.once('error', (err) => {
