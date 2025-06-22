@@ -1,6 +1,6 @@
 {
   "richard.genet@gmail.com": {
-    "conversation_history": "\nQuestion: Great! Are you ready to discuss the details of your home task now?\nLearned: The customer will contact the contractor today.",
+    "conversation_history": "\nQuestion: Great! Are you ready to discuss the details of your home task now?\nLearned: The customer will contact the contractor today.\nQuestion: That's great! Do you have any concerns or questions about the task that you would like to discuss?\nLearned: The customer is ready to discuss the task and will contact the contractor today.",
     "is_complete": false,
     "user_email": "richard.genet@gmail.com"
   }

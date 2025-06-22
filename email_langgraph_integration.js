@@ -50,6 +50,10 @@ const DEDUPLICATION_WINDOW = 60000; // 60 seconds in milliseconds
 // Track emails being processed in current session to prevent race conditions
 const processingEmails = new Set(); // email UIDs currently being processed
 
+// Track last email sent time to implement throttling
+const lastEmailSentTime = new Map(); // userEmail -> timestamp
+const EMAIL_THROTTLE_MIN_INTERVAL = 3000; // 3 seconds minimum between emails
+
 const watcherStartTime = Date.now(); // Record watcher start time
 
 // Function to check if user has been processed recently
@@ -494,6 +498,13 @@ function checkEmails(conversationStates, processedEmails) {
                 
                 // Send the next question if conversation is not complete
                 if (!result.is_complete && result.question) {
+                  // Check throttle before sending email
+                  const waitTime = throttleEmailSending(userEmail);
+                  if (waitTime > 0) {
+                    console.log(`⏳ Waiting ${waitTime}ms before sending email to ${userEmail}`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                  }
+                  
                   await sendEmailViaGCP(
                     userEmail,
                     `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`,
@@ -509,13 +520,26 @@ Best regards,
 Helen
 Prizm Real Estate Concierge Service`
                   );
+                  
+                  // Update last email sent time
+                  updateLastEmailSentTime(userEmail);
                 } else if (result.is_complete) {
+                  // Check throttle before sending completion email
+                  const waitTime = throttleEmailSending(userEmail);
+                  if (waitTime > 0) {
+                    console.log(`⏳ Waiting ${waitTime}ms before sending completion email to ${userEmail}`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                  }
+                  
                   // Send completion message
                   await sendEmailViaGCP(
                     userEmail,
                     "Prizm Task Conversation Complete",
                     "Thank you for your time. We've completed our conversation about your task."
                   );
+                  
+                  // Update last email sent time
+                  updateLastEmailSentTime(userEmail);
                 }
                 
                 // Add email content to buffer after processing
@@ -607,6 +631,13 @@ async function startNewConversation(userEmail) {
   
   // Send the first question
   if (result.question) {
+    // Check throttle before sending first email
+    const waitTime = throttleEmailSending(userEmail);
+    if (waitTime > 0) {
+      console.log(`⏳ Waiting ${waitTime}ms before sending first email to ${userEmail}`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    
     await sendEmailViaGCP(
       userEmail,
       "Prizm Task Question #1",
@@ -622,6 +653,9 @@ Best regards,
 Helen
 Prizm Real Estate Concierge Service`
     );
+    
+    // Update last email sent time
+    updateLastEmailSentTime(userEmail);
   }
   
   return result;
@@ -744,4 +778,29 @@ function addEmailContentToBuffer(userEmail, emailContent) {
   
   saveEmailContentBuffer(buffer);
   console.log(`📝 Added email content to buffer for ${userEmail}`);
+}
+
+// Function to throttle email sending
+function throttleEmailSending(userEmail) {
+  const now = Date.now();
+  const lastSent = lastEmailSentTime.get(userEmail) || 0;
+  const timeSinceLastEmail = now - lastSent;
+  
+  if (timeSinceLastEmail < EMAIL_THROTTLE_MIN_INTERVAL) {
+    // Calculate wait time based on even/odd seconds
+    const currentSeconds = Math.floor(now / 1000);
+    const isEvenSecond = currentSeconds % 2 === 0;
+    const waitTime = isEvenSecond ? 1000 : 3000; // 1 second if even, 3 seconds if odd
+    
+    console.log(`⏰ Throttling email to ${userEmail} - waiting ${waitTime}ms (${isEvenSecond ? 'even' : 'odd'} second)`);
+    return waitTime;
+  }
+  
+  return 0; // No wait needed
+}
+
+// Function to update last email sent time
+function updateLastEmailSentTime(userEmail) {
+  lastEmailSentTime.set(userEmail, Date.now());
+  console.log(`📧 Updated last email sent time for ${userEmail}`);
 } 
