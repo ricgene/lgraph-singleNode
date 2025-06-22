@@ -250,6 +250,12 @@ async function sendEmailViaGCP(to, subject, body) {
       body: body
     });
     
+    // Enhanced logging: log status, headers, and body
+    console.log('GCP Email Function Response:');
+    console.log('Status:', response.status);
+    console.log('Headers:', JSON.stringify(response.headers));
+    console.log('Body:', typeof response.data === 'object' ? JSON.stringify(response.data) : response.data);
+    
     if (response.status === 200) {
       console.log('Email sent via GCP function:', subject);
       return true;
@@ -258,7 +264,20 @@ async function sendEmailViaGCP(to, subject, body) {
       return false;
     }
   } catch (error) {
-    console.error('Error sending email via GCP function:', error.message);
+    if (error.response) {
+      // The request was made and the server responded with a status code outside 2xx
+      console.error('GCP Email Function Error Response:');
+      console.error('Status:', error.response.status);
+      console.error('Headers:', JSON.stringify(error.response.headers));
+      console.error('Body:', typeof error.response.data === 'object' ? JSON.stringify(error.response.data) : error.response.data);
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error('No response received from GCP Email Function.');
+      console.error(error.request);
+    } else {
+      // Something happened in setting up the request
+      console.error('Error setting up GCP Email Function request:', error.message);
+    }
     return false;
   }
 }
@@ -345,13 +364,17 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
         const emailDate = parsed.date ? new Date(parsed.date).getTime() : 0;
         if (emailDate && emailDate < watcherStartTime) {
           // Move this email to Trash and log it
-          imap.addFlags(msg.attributes.uid, '\\Deleted', (err) => {
-            if (err) {
-              console.error('❌ Failed to mark old email for deletion:', err);
-            } else {
-              console.log('🗑️ Deleted old email (before watcher start):', parsed.subject, parsed.date, parsed.messageId);
-            }
-          });
+          if (msg.attributes && msg.attributes.uid) {
+            imap.addFlags(msg.attributes.uid, '\\Deleted', (err) => {
+              if (err) {
+                console.error('❌ Failed to mark old email for deletion:', err);
+              } else {
+                console.log('🗑️ Deleted old email (before watcher start):', parsed.subject, parsed.date, parsed.messageId);
+              }
+            });
+          } else {
+            console.log('🗑️ Skipping deletion of old email (no UID available):', parsed.subject, parsed.date, parsed.messageId);
+          }
           return; // Skip processing this email
         }
         
