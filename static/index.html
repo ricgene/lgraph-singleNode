@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph Agent Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f7f9fc;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        #chat-container {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background-color: white;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 8px 12px;
+            border-radius: 18px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .user {
+            background-color: #e1f5fe;
+            margin-left: auto;
+            text-align: right;
+            border-bottom-right-radius: 4px;
+        }
+        .assistant {
+            background-color: #f1f1f1;
+            margin-right: auto;
+            border-bottom-left-radius: 4px;
+        }
+        .complete {
+            background-color: #e8f5e9;
+            margin: 10px auto;
+            text-align: center;
+            border-radius: 8px;
+            padding: 10px;
+            font-weight: bold;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+            margin: 10px auto;
+            text-align: center;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        #input-container {
+            display: flex;
+            gap: 10px;
+        }
+        #message-input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        #send-button {
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #send-button:hover {
+            background-color: #0d8bf2;
+        }
+        #send-button:disabled {
+            background-color: #bdbdbd;
+            cursor: not-allowed;
+        }
+        .typing-indicator {
+            display: inline-block;
+            padding: 0 5px;
+        }
+        .typing-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            margin-right: 3px;
+            background-color: #666;
+            border-radius: 50%;
+            animation: typing 1.5s infinite ease-in-out;
+        }
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+            margin-right: 0;
+        }
+        @keyframes typing {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+            100% { transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <h1>LangGraph Agent Demo</h1>
+    <div id="chat-container"></div>
+    <div id="input-container">
+        <input type="text" id="message-input" placeholder="Type your message here..." autocomplete="off">
+        <button id="send-button">Send</button>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chat-container');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        
+        let socket;
+        let isStreaming = false;
+        let currentMessageElement = null;
+        let currentSessionId = null;
+        
+        function connectWebSocket() {
+            // Get the current host and protocol
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            
+            // Create WebSocket connection
+            socket = new WebSocket(`${protocol}//${host}/chat`);
+            
+            socket.onopen = function(e) {
+                console.log("WebSocket connection established");
+                sendButton.disabled = false;
+                messageInput.disabled = false;
+                // Show typing indicator immediately
+                const typingElement = document.createElement('div');
+                typingElement.className = 'message assistant typing-indicator';
+                typingElement.innerHTML = '<span></span><span></span><span></span>';
+                chatContainer.appendChild(typingElement);
+            };
+            
+            socket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log("Received message:", data);  // Debug log
+                    
+                    // Store session ID if received
+                    if (data.session_id) {
+                        currentSessionId = data.session_id;
+                        console.log("Updated session ID:", currentSessionId);
+                    }
+                    
+                    if (data.type === "chunk") {
+                        // If this is the first chunk of a new message
+                        if (!isStreaming) {
+                            isStreaming = true;
+                            // Remove typing indicator if it exists
+                            const typingIndicator = chatContainer.querySelector('.typing-indicator');
+                            if (typingIndicator) {
+                                chatContainer.removeChild(typingIndicator);
+                            }
+                            // Create new message element
+                            currentMessageElement = document.createElement('div');
+                            currentMessageElement.className = 'message assistant';
+                            currentMessageElement.textContent = '';
+                            chatContainer.appendChild(currentMessageElement);
+                        }
+                        
+                        // Add chunk to current message
+                        currentMessageElement.textContent += data.content;
+                        // Scroll to bottom
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        
+                        // Enable input after receiving any response
+                        messageInput.disabled = false;
+                        sendButton.disabled = false;
+                    }
+                    else if (data.type === "message") {
+                        // Complete message received
+                        isStreaming = false;
+                        
+                        // Remove typing indicator if it exists
+                        const typingIndicator = chatContainer.querySelector('.typing-indicator');
+                        if (typingIndicator) {
+                            chatContainer.removeChild(typingIndicator);
+                        }
+                        
+                        // Create new message element
+                        const messageElement = document.createElement('div');
+                        messageElement.className = 'message assistant';
+                        messageElement.textContent = data.content;
+                        chatContainer.appendChild(messageElement);
+                        
+                        currentMessageElement = null;
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        messageInput.disabled = false;
+                        sendButton.disabled = false;
+                    }
+                    else if (data.type === "complete") {
+                        // Processing complete
+                        const completeElement = document.createElement('div');
+                        completeElement.className = 'complete';
+                        completeElement.textContent = `Questionnaire complete! Determined outcome: ${data.content.outcome}`;
+                        chatContainer.appendChild(completeElement);
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        
+                        console.log("Complete data:", data.content);
+                        
+                        // Reset session
+                        currentSessionId = null;
+                    }
+                    else if (data.type === "error") {
+                        // Error occurred
+                        isStreaming = false;
+                        const errorElement = document.createElement('div');
+                        errorElement.className = 'error';
+                        errorElement.textContent = `Error: ${data.content}`;
+                        chatContainer.appendChild(errorElement);
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        messageInput.disabled = false;
+                        sendButton.disabled = false;
+                        
+                        // If it's a session error, reset the session
+                        if (data.content.includes("Invalid session")) {
+                            currentSessionId = null;
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error processing message:", error);
+                    const errorElement = document.createElement('div');
+                    errorElement.className = 'error';
+                    errorElement.textContent = 'Error processing server response. Please try again.';
+                    chatContainer.appendChild(errorElement);
+                }
+            };
+            
+            socket.onclose = function(event) {
+                console.log("WebSocket closed:", event.code, event.reason);
+                if (event.wasClean) {
+                    console.log('Connection closed cleanly');
+                } else {
+                    console.log('Connection died');
+                }
+                // Don't disable input on close, just try to reconnect
+                setTimeout(connectWebSocket, 1000);
+            };
+            
+            socket.onerror = function(error) {
+                console.error("WebSocket error:", error);
+                // Don't disable input on error, just try to reconnect
+                setTimeout(connectWebSocket, 1000);
+            };
+        }
+        
+        // Initial connection
+        connectWebSocket();
+        
+        // Handle sending messages
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && socket && socket.readyState === WebSocket.OPEN) {
+                // Disable input while sending
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                
+                // Create user message element
+                const messageElement = document.createElement('div');
+                messageElement.className = 'message user';
+                messageElement.textContent = message;
+                chatContainer.appendChild(messageElement);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+                
+                // Clear input
+                messageInput.value = '';
+                
+                // Send message
+                const data = {
+                    content: message,
+                    session_id: currentSessionId
+                };
+                console.log("Sending message:", data);
+                socket.send(JSON.stringify(data));
+                
+                // Show typing indicator
+                const typingElement = document.createElement('div');
+                typingElement.className = 'message assistant typing-indicator';
+                typingElement.innerHTML = '<span></span><span></span><span></span>';
+                chatContainer.appendChild(typingElement);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+        
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

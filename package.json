@@ -1,0 +1,27 @@
+{
+  "name": "langgraph-email-integration",
+  "version": "1.0.0",
+  "description": "Email integration for LangGraph conversation agent",
+  "main": "email_langgraph_integration.js",
+  "scripts": {
+    "start": "node email_langgraph_integration.js",
+    "server": "python langgraph_server.py",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "firebase": "^10.14.1",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.5",
+    "nodemailer": "^6.9.0"
+  },
+  "keywords": [
+    "langgraph",
+    "email",
+    "conversation",
+    "ai"
+  ],
+  "author": "Richard Genet",
+  "license": "MIT"
+}

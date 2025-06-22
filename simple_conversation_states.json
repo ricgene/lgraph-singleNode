@@ -1,0 +1,14 @@
+{
+  "test@example.com": {
+    "conversation_history": "\nQuestion: That's great! Before we proceed, could you please confirm if you are ready to discuss the details of your kitchen task now?\nLearned: The customer is willing to reach out to the contractor about their kitchen task.",
+    "is_complete": false,
+    "user_email": "test@example.com",
+    "turn_count": 0
+  },
+  "other@example.com": {
+    "conversation_history": "\nQuestion: Are you ready to discuss the details of your bathroom renovation task now?\nLearned: The customer needs help with a bathroom renovation, but I don't know yet if they are ready to discuss the details.",
+    "is_complete": false,
+    "user_email": "other@example.com",
+    "turn_count": 0
+  }
+}

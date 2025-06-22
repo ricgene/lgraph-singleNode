@@ -1,0 +1,10 @@
+{
+    "name": "customer-service-agent",
+    "description": "A customer service agent that conducts progressive questioning using LangGraph",
+    "graphs": {
+        "customer-service": {
+            "entrypoint": "agent2.py:workflow",
+            "runtime": "inmem"
+        }
+    }
+} 

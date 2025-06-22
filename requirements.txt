@@ -1,0 +1,16 @@
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langgraph>=0.2.27
+python-dotenv>=1.0.1
+langsmith>=0.1.0
+langchain-core>=0.1.0
+functions-framework==3.*
+google-cloud-storage==2.*
+google-cloud-documentai==2.*
+google-cloud-aiplatform==1.*
+vertexai==0.0.1
+requests>=2.25.0
+flask>=2.0.0
+flask-cors>=3.0.0
+# Email functionality calls deployed GCP email function
+# Flask server exposes LangGraph functions for email integration
