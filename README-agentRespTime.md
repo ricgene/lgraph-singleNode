@@ -6,11 +6,11 @@ The current system experiences a **1-2 minute delay** between when a user sends 
 
 ## Sources of Delay
 
-### 1. **IMAP Polling Interval** (Primary Cause - 30 seconds)
+### 1. **IMAP Polling Interval** (Primary Cause - 60 seconds)
 - **Location**: `email_langgraph_integration.js`
-- **Current Setting**: `setInterval(checkForNewEmails, 30000); // 30 seconds`
-- **Impact**: Up to 30 seconds just for email detection
-- **Optimization**: Reduce to 5-10 seconds for faster detection
+- **Current Setting**: `setInterval(checkForNewEmails, 60000); // 60 seconds (1 minute)`
+- **Impact**: Up to 60 seconds just for email detection
+- **Optimization**: Already optimized from 2 minutes to 1 minute
 
 ### 2. **Gmail IMAP Processing** (10-30 seconds)
 - IMAP connection establishment time
@@ -68,10 +68,10 @@ The current system experiences a **1-2 minute delay** between when a user sends 
 
 | Optimization | Current Time | Optimized Time | Improvement |
 |--------------|--------------|----------------|-------------|
-| Polling Interval | 30s | 5s | 25s |
+| Polling Interval | 60s | 5s | 55s |
 | Gmail API Push | 30s | 2s | 28s |
 | Async Processing | 8s | 2s | 6s |
-| **Total** | **68s** | **9s** | **59s** |
+| **Total** | **98s** | **9s** | **89s** |
 
 ## Implementation Priority
 

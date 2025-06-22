@@ -54,6 +54,9 @@ const processingEmails = new Set(); // email UIDs currently being processed
 const lastEmailSentTime = new Map(); // userEmail -> timestamp
 const EMAIL_THROTTLE_MIN_INTERVAL = 3000; // 3 seconds minimum between emails
 
+// Track processed email content with timestamps
+const processedEmailContent = new Map(); // userEmail -> { contentHash: timestamp }
+
 const watcherStartTime = Date.now(); // Record watcher start time
 
 // Function to check if user has been processed recently
@@ -455,7 +458,7 @@ function checkEmails(conversationStates, processedEmails) {
                 }
                 
                 // Check if this email content is a duplicate
-                if (isEmailContentDuplicate(userEmail, userResponse)) {
+                if (isEmailContentProcessed(userEmail, userResponse)) {
                   console.log(`🚫 Skipping duplicate email content from ${userEmail}`);
                   return;
                 }
@@ -493,16 +496,28 @@ function checkEmails(conversationStates, processedEmails) {
                 // Save conversation state to storage
                 await saveConversationState(userEmail, conversationStates[userEmail]);
                 
-                // Clear email buffer before sending agent email (as requested)
-                clearEmailBuffer();
+                // DOUBLE-CHECK: Verify email content hasn't been processed by another instance
+                if (isEmailContentProcessed(userEmail, userResponse)) {
+                  console.log(`🚫 DOUBLE-CHECK: Email content already processed by another instance for ${userEmail}`);
+                  return;
+                }
+                
+                // MARK EMAIL CONTENT AS PROCESSED AFTER DOUBLE-CHECK
+                markEmailContentProcessed(userEmail, userResponse);
                 
                 // Send the next question if conversation is not complete
                 if (!result.is_complete && result.question) {
                   // Check throttle before sending email
-                  const waitTime = throttleEmailSending(userEmail);
+                  const waitTime = enforceStrictThrottle(userEmail);
                   if (waitTime > 0) {
                     console.log(`⏳ Waiting ${waitTime}ms before sending email to ${userEmail}`);
                     await new Promise(resolve => setTimeout(resolve, waitTime));
+                  }
+                  
+                  // FINAL CHECK: One more verification before sending
+                  if (isEmailContentProcessed(userEmail, userResponse)) {
+                    console.log(`🚫 FINAL CHECK: Email content already processed before sending to ${userEmail}`);
+                    return;
                   }
                   
                   await sendEmailViaGCP(
@@ -525,10 +540,16 @@ Prizm Real Estate Concierge Service`
                   updateLastEmailSentTime(userEmail);
                 } else if (result.is_complete) {
                   // Check throttle before sending completion email
-                  const waitTime = throttleEmailSending(userEmail);
+                  const waitTime = enforceStrictThrottle(userEmail);
                   if (waitTime > 0) {
                     console.log(`⏳ Waiting ${waitTime}ms before sending completion email to ${userEmail}`);
                     await new Promise(resolve => setTimeout(resolve, waitTime));
+                  }
+                  
+                  // FINAL CHECK: One more verification before sending
+                  if (isEmailContentProcessed(userEmail, userResponse)) {
+                    console.log(`🚫 FINAL CHECK: Email content already processed before sending completion to ${userEmail}`);
+                    return;
                   }
                   
                   // Send completion message
@@ -541,9 +562,6 @@ Prizm Real Estate Concierge Service`
                   // Update last email sent time
                   updateLastEmailSentTime(userEmail);
                 }
-                
-                // Add email content to buffer after processing
-                addEmailContentToBuffer(userEmail, userResponse);
                 
                 // Mark this email as processed globally
                 processedEmails.add(emailUid);
@@ -595,12 +613,12 @@ async function startWatchingEmails() {
   // Check immediately
   checkEmails(conversationStates, processedEmails);
   
-  // Then check every 2 minutes (more frequent for better responsiveness)
+  // Then check every 1 minute (more frequent for better responsiveness)
   const interval = setInterval(() => {
     checkEmails(conversationStates, processedEmails);
     // Save processed emails periodically to persist across restarts
     saveProcessedEmails(processedEmails);
-  }, 2 * 60 * 1000);
+  }, 1 * 60 * 1000);
   
   // Return function to stop watching
   return () => {
@@ -626,13 +644,10 @@ async function startNewConversation(userEmail) {
   // Get the first question from LangGraph
   const result = await processUserResponse(userEmail, "", conversationState);
   
-  // Clear email buffer before sending agent email (as requested)
-  clearEmailBuffer();
-  
   // Send the first question
   if (result.question) {
     // Check throttle before sending first email
-    const waitTime = throttleEmailSending(userEmail);
+    const waitTime = enforceStrictThrottle(userEmail);
     if (waitTime > 0) {
       console.log(`⏳ Waiting ${waitTime}ms before sending first email to ${userEmail}`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -665,9 +680,6 @@ Prizm Real Estate Concierge Service`
 async function main() {
   console.log('Starting LangGraph Email Integration...');
   
-  // Clear email buffer file on startup
-  clearEmailBuffer();
-  
   try {
     // Start watching for emails
     const stopWatching = await startWatchingEmails();
@@ -693,7 +705,11 @@ module.exports = {
   processUserResponse,
   checkEmails,
   startWatchingEmails,
-  startNewConversation
+  startNewConversation,
+  markEmailContentProcessed,
+  isEmailContentProcessed,
+  enforceStrictThrottle,
+  updateLastEmailSentTime
 };
 
 // Run the main function if this file is executed directly
@@ -735,25 +751,61 @@ function saveEmailContentBuffer(buffer) {
   }
 }
 
-// Function to check if email content is duplicate
-function isEmailContentDuplicate(userEmail, emailContent) {
-  const buffer = loadEmailContentBuffer();
+// Function to check if email content was already processed
+function isEmailContentProcessed(userEmail, emailContent) {
   const userKey = userEmail.toLowerCase().trim();
+  const userProcessed = processedEmailContent.get(userKey) || {};
   
-  if (!buffer[userKey]) {
-    return false;
-  }
-  
-  // Create a simple hash of the email content
+  // Create hash of the email content
   const contentHash = require('crypto').createHash('md5').update(emailContent.toLowerCase().trim()).digest('hex');
   
   // Check if this exact content was already processed
-  if (buffer[userKey].includes(contentHash)) {
-    console.log(`🚫 Duplicate email content detected for ${userEmail}`);
+  if (userProcessed[contentHash]) {
+    const processedTime = userProcessed[contentHash];
+    const now = Date.now();
+    const timeSinceProcessed = now - processedTime;
+    
+    console.log(`🚫 Email content already processed for ${userEmail} ${Math.round(timeSinceProcessed/1000)}s ago`);
     return true;
   }
   
   return false;
+}
+
+// Function to mark email content as processed
+function markEmailContentProcessed(userEmail, emailContent) {
+  const userKey = userEmail.toLowerCase().trim();
+  const userProcessed = processedEmailContent.get(userKey) || {};
+  
+  // Create hash of the email content
+  const contentHash = require('crypto').createHash('md5').update(emailContent.toLowerCase().trim()).digest('hex');
+  
+  // Mark as processed with timestamp
+  userProcessed[contentHash] = Date.now();
+  processedEmailContent.set(userKey, userProcessed);
+  
+  console.log(`✅ Marked email content as processed for ${userEmail}`);
+}
+
+// Function to enforce strict 3-second minimum between emails
+function enforceStrictThrottle(userEmail) {
+  const now = Date.now();
+  const lastSent = lastEmailSentTime.get(userEmail) || 0;
+  const timeSinceLastEmail = now - lastSent;
+  
+  if (timeSinceLastEmail < EMAIL_THROTTLE_MIN_INTERVAL) {
+    const waitTime = EMAIL_THROTTLE_MIN_INTERVAL - timeSinceLastEmail;
+    console.log(`⏰ STRICT THROTTLE: Must wait ${waitTime}ms before sending email to ${userEmail}`);
+    return waitTime;
+  }
+  
+  return 0; // No wait needed
+}
+
+// Function to update last email sent time
+function updateLastEmailSentTime(userEmail) {
+  lastEmailSentTime.set(userEmail, Date.now());
+  console.log(`📧 Updated last email sent time for ${userEmail}`);
 }
 
 // Function to add email content to buffer
@@ -778,29 +830,4 @@ function addEmailContentToBuffer(userEmail, emailContent) {
   
   saveEmailContentBuffer(buffer);
   console.log(`📝 Added email content to buffer for ${userEmail}`);
-}
-
-// Function to throttle email sending
-function throttleEmailSending(userEmail) {
-  const now = Date.now();
-  const lastSent = lastEmailSentTime.get(userEmail) || 0;
-  const timeSinceLastEmail = now - lastSent;
-  
-  if (timeSinceLastEmail < EMAIL_THROTTLE_MIN_INTERVAL) {
-    // Calculate wait time based on even/odd seconds
-    const currentSeconds = Math.floor(now / 1000);
-    const isEvenSecond = currentSeconds % 2 === 0;
-    const waitTime = isEvenSecond ? 1000 : 3000; // 1 second if even, 3 seconds if odd
-    
-    console.log(`⏰ Throttling email to ${userEmail} - waiting ${waitTime}ms (${isEvenSecond ? 'even' : 'odd'} second)`);
-    return waitTime;
-  }
-  
-  return 0; // No wait needed
-}
-
-// Function to update last email sent time
-function updateLastEmailSentTime(userEmail) {
-  lastEmailSentTime.set(userEmail, Date.now());
-  console.log(`📧 Updated last email sent time for ${userEmail}`);
 } 

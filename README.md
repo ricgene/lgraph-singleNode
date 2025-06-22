@@ -244,6 +244,8 @@ node email_langgraph_integration.js
 ## Current Status
 - **Email integration is working** (Gmail IMAP → Flask API → GCP email function)
 - **Duplicate email issue is fixed** (content-based duplicate detection with buffer clearing)
+- **Email throttling is active** (3-second minimum interval between emails)
+- **Fast polling** (1-minute intervals for quick response times)
 - **File-based storage** is used for both conversation state and duplicate email tracking (Firebase is disabled)
 - **Servers must not be started multiple times** (avoid port conflicts and duplicate processing)
 
@@ -257,6 +259,10 @@ The system now includes a robust duplicate email detection mechanism to prevent 
    - **On server startup** - prevents old duplicates from affecting new sessions
    - **Before sending each agent email** - ensures fresh state for each response
 3. **User-specific Tracking**: Duplicate detection is per-user, so different users can send similar content
+4. **Email Throttling**: Prevents emails from being sent faster than every 3 seconds:
+   - **Even seconds**: 1 second wait if throttling needed
+   - **Odd seconds**: 3 seconds wait if throttling needed
+   - **Per-user tracking**: Each user has independent throttle timing
 
 ### Files Used
 - `email_content_buffer.json` - Stores email content hashes for duplicate detection
@@ -269,7 +275,13 @@ Run the duplicate detection test:
 python test_duplicate_detection.py
 ```
 
+Run the throttle test:
+```bash
+python test_throttle.py
+```
+
 This will test:
 - Content-based duplicate detection
 - Buffer clearing functionality
+- Email throttling (3-second minimum interval)
 - Server integration (if Flask server is running)
