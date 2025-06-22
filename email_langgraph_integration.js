@@ -556,109 +556,63 @@ function checkEmails(conversationStates, processedEmails) {
   const imap = createImapConnection();
 
   imap.once('ready', () => {
-    // Search across all Gmail folders (INBOX, Social, Promotions, etc.)
-    const searchAllFolders = async () => {
-      try {
-        // Get list of all folders
-        imap.getBoxes((err, boxes) => {
+    // Search in [Gmail].All Mail folder which contains all emails including Social, Promotions, etc.
+    imap.openBox('[Gmail].All Mail', false, (err, box) => {
+      if (err) {
+        console.error('Could not open [Gmail].All Mail folder:', err.message);
+        // Fallback to INBOX
+        imap.openBox('INBOX', false, (err, box) => {
           if (err) {
-            console.error('Error getting folders:', err);
+            console.error('Could not open INBOX folder:', err.message);
+            imap.end();
+            return;
+          }
+          searchForEmails();
+        });
+        return;
+      }
+      
+      searchForEmails();
+      
+      function searchForEmails() {
+        // Use today's date in DD-MMM-YYYY format for SINCE
+        const today = new Date();
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const day = today.getDate();
+        const month = months[today.getMonth()];
+        const year = today.getFullYear();
+        const imapDate = `${day}-${month}-${year}`;
+        
+        // Search criteria - look for UNSEEN emails with our subject
+        const searchCriteria = [
+          'UNSEEN', 
+          ['SUBJECT', 'Re: Prizm Task Question'], 
+          ['SINCE', imapDate]
+        ];
+        
+        console.log('Searching in [Gmail].All Mail folder');
+        console.log('Search criteria:', searchCriteria);
+        
+        imap.search(searchCriteria, (err, results) => {
+          if (err) {
+            console.error('Error searching for emails:', err);
             imap.end();
             return;
           }
           
-          const folders = [];
-          const addFolders = (boxList, prefix = '') => {
-            for (const [name, box] of Object.entries(boxList)) {
-              if (box.children) {
-                addFolders(box.children, prefix + name + '.');
-              } else {
-                folders.push(prefix + name);
-              }
-            }
-          };
-          addFolders(boxes);
+          if (results.length === 0) {
+            console.log('No new Prizm email replies found in [Gmail].All Mail');
+            imap.end();
+            return;
+          }
           
-          console.log('Available folders:', folders);
+          console.log(`Found ${results.length} new Prizm email replies in [Gmail].All Mail`);
           
-          // Search in each folder
-          let totalFound = 0;
-          let foldersChecked = 0;
-          
-          const checkFolder = (folderName) => {
-            imap.openBox(folderName, false, (err, box) => {
-              if (err) {
-                console.log(`Could not open folder ${folderName}:`, err.message);
-                foldersChecked++;
-                if (foldersChecked >= folders.length) {
-                  if (totalFound === 0) {
-                    console.log('No new Prizm email replies found in any folder');
-                  }
-                  imap.end();
-                }
-                return;
-              }
-              
-              // Use today's date in DD-MMM-YYYY format for SINCE
-              const today = new Date();
-              const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-              const day = today.getDate();
-              const month = months[today.getMonth()];
-              const year = today.getFullYear();
-              const imapDate = `${day}-${month}-${year}`;
-              
-              // Search criteria
-              const searchCriteria = [
-                'UNSEEN', 
-                ['SUBJECT', 'Re: Prizm Task Question'], 
-                ['SINCE', imapDate]
-              ];
-              
-              console.log(`Searching in folder: ${folderName}`);
-              console.log('Search criteria:', searchCriteria);
-              
-              imap.search(searchCriteria, (err, results) => {
-                if (err) {
-                  console.error(`Error searching in ${folderName}:`, err);
-                  foldersChecked++;
-                  if (foldersChecked >= folders.length) {
-                    if (totalFound === 0) {
-                      console.log('No new Prizm email replies found in any folder');
-                    }
-                    imap.end();
-                  }
-                  return;
-                }
-                
-                if (results.length > 0) {
-                  console.log(`Found ${results.length} new Prizm email replies in ${folderName}`);
-                  totalFound += results.length;
-                  
-                  // Process the emails found in this folder
-                  processEmailsInFolder(results, folderName);
-                }
-                
-                foldersChecked++;
-                if (foldersChecked >= folders.length) {
-                  if (totalFound === 0) {
-                    console.log('No new Prizm email replies found in any folder');
-                  }
-                  imap.end();
-                }
-              });
-            });
-          };
-          
-          // Start checking folders
-          folders.forEach(checkFolder);
+          // Process the emails found
+          processEmailsInFolder(results, '[Gmail].All Mail');
         });
-      } catch (error) {
-        console.error('Error in searchAllFolders:', error);
-        imap.end();
       }
-    };
-    
-    searchAllFolders();
+    });
   });
 
   imap.once('error', (err) => {
