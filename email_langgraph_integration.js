@@ -436,67 +436,40 @@ function processEmailsInFolder(results, folderName, imap, processedEmails, conve
             userResponse = userResponse.split('\n').slice(0, 3).join('\n').trim();
           }
           
-          // Check if this email content is a duplicate
-          if (isEmailContentProcessed(userEmail, userResponse)) {
-            console.log(`🚫 Skipping duplicate email content from ${userEmail}`);
-            return;
-          }
-          
           console.log('Processing reply from:', userEmail);
-          console.log('User response:', userResponse.substring(0, 100) + '...');
+          console.log('User response:', userResponse);
           
           // Get or create conversation state for this user
-          if (!conversationStates[userEmail]) {
-            // Try to load existing state from storage
-            const existingState = await loadConversationState(userEmail);
-            if (existingState) {
-              conversationStates[userEmail] = existingState;
-              console.log(`✅ Loaded existing conversation state for ${userEmail}`);
-            } else {
-              conversationStates[userEmail] = {
-                conversation_history: "",
-                is_complete: false,
-                user_email: userEmail
-              };
-              console.log(`✅ Created new conversation state for ${userEmail}`);
-            }
+          let conversationState = conversationStates.get(userEmail);
+          if (!conversationState) {
+            conversationState = {
+              conversation_history: "",
+              is_complete: false,
+              user_email: userEmail
+            };
           }
           
           // Process the user's response through LangGraph
-          const result = await processUserResponse(userEmail, userResponse, conversationStates[userEmail]);
+          const result = await processUserResponse(userEmail, userResponse, conversationState);
           
           // Update conversation state
-          conversationStates[userEmail] = {
-            conversation_history: result.conversation_history,
-            is_complete: result.is_complete,
-            user_email: userEmail
-          };
+          conversationState.conversation_history = result.conversation_history;
+          conversationState.is_complete = result.is_complete;
+          conversationStates.set(userEmail, conversationState);
           
-          // Save conversation state to storage
-          await saveConversationState(userEmail, conversationStates[userEmail]);
+          // Save the updated conversation state
+          await saveConversationState(userEmail, conversationState);
           
-          // DOUBLE-CHECK: Verify email content hasn't been processed by another instance
-          if (isEmailContentProcessed(userEmail, userResponse)) {
-            console.log(`🚫 DOUBLE-CHECK: Email content already processed by another instance for ${userEmail}`);
-            return;
-          }
+          // Update recent user activity
+          recentUserActivity.set(userEmail, Date.now());
           
-          // MARK EMAIL CONTENT AS PROCESSED AFTER DOUBLE-CHECK
-          markEmailContentProcessed(userEmail, userResponse);
-          
-          // Send the next question if conversation is not complete
-          if (!result.is_complete && result.question) {
-            // Check throttle before sending email
+          // Send response email if there's a question
+          if (result.question && !result.is_complete) {
+            // Check throttle before sending
             const waitTime = enforceStrictThrottle(userEmail);
             if (waitTime > 0) {
               console.log(`⏳ Waiting ${waitTime}ms before sending email to ${userEmail}`);
               await new Promise(resolve => setTimeout(resolve, waitTime));
-            }
-            
-            // FINAL CHECK: One more verification before sending
-            if (isEmailContentProcessed(userEmail, userResponse)) {
-              console.log(`🚫 FINAL CHECK: Email content already processed before sending to ${userEmail}`);
-              return;
             }
             
             await sendEmailViaGCP(
@@ -525,12 +498,6 @@ Prizm Real Estate Concierge Service`
               await new Promise(resolve => setTimeout(resolve, waitTime));
             }
             
-            // FINAL CHECK: One more verification before sending
-            if (isEmailContentProcessed(userEmail, userResponse)) {
-              console.log(`🚫 FINAL CHECK: Email content already processed before sending completion to ${userEmail}`);
-              return;
-            }
-            
             // Send completion message
             await sendEmailViaGCP(
               userEmail,
@@ -541,6 +508,9 @@ Prizm Real Estate Concierge Service`
             // Update last email sent time
             updateLastEmailSentTime(userEmail);
           }
+          
+          // Mark this email content as processed AFTER sending
+          markEmailContentProcessed(userEmail, userResponse);
           
           // Mark this email as processed globally
           processingEmails.add(emailUid);
