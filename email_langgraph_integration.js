@@ -2,37 +2,34 @@ const nodemailer = require('nodemailer');
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
 const axios = require('axios');
-// const { initializeApp } = require('firebase/app');
-// const { getFirestore, doc, getDoc, setDoc, collection } = require('firebase/firestore');
 const fs = require('fs');
-const path = require('path');
+const { getFirestore, doc, getDoc, setDoc, collection, getDocs } = require('firebase/firestore');
+const { initializeApp } = require('firebase/app');
 require('dotenv').config();
 
-// Firebase configuration - DISABLED for now
-// const firebaseConfig = {
-//   apiKey: process.env.FIREBASE_API_KEY,
-//   authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-//   projectId: process.env.FIREBASE_PROJECT_ID,
-//   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-//   messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-//   appId: process.env.FIREBASE_APP_ID
-// };
-
-// Initialize Firebase - DISABLED for now
+// Initialize Firebase/Firestore if credentials are available
 let db = null;
-// try {
-//   const app = initializeApp(firebaseConfig);
-//   db = getFirestore(app);
-//   console.log('✅ Firebase initialized successfully');
-//   console.log('📁 Using Firestore for conversation states');
-//   console.log('📧 Using Firestore for duplicate email tracking');
-// } catch (error) {
-//   console.warn('⚠️ Firebase not configured, falling back to file-based storage');
-//   console.warn('Set FIREBASE_* environment variables to use Firestore');
-// }
+let app = null;
 
-console.log('📁 Using file-based storage for conversation states');
-console.log('📧 Using file-based storage for duplicate email tracking');
+if (process.env.FIREBASE_API_KEY && process.env.FIREBASE_AUTH_DOMAIN && process.env.FIREBASE_PROJECT_ID) {
+  const firebaseConfig = {
+    apiKey: process.env.FIREBASE_API_KEY,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.FIREBASE_APP_ID
+  };
+  
+  app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+  console.log('📁 Using Firestore for conversation states');
+  console.log('📧 Using Firestore for duplicate email tracking');
+} else {
+  console.warn('Set FIREBASE_* environment variables to use Firestore');
+  console.log('📁 Using file-based storage for conversation states');
+  console.log('📧 Using file-based storage for duplicate email tracking');
+}
 
 // Debug: Check if environment variables are loaded
 console.log('Gmail User:', process.env.GMAIL_USER);
@@ -88,10 +85,13 @@ async function loadConversationStates() {
   if (db) {
     try {
       // Load all conversation states from Firestore
-      const conversationStates = {};
-      // Note: In a real implementation, you'd want to paginate this
-      // For now, we'll load states as needed per user
-      return conversationStates;
+      const statesRef = collection(db, 'conversation_states');
+      const snapshot = await getDocs(statesRef);
+      const states = {};
+      snapshot.forEach(doc => {
+        states[doc.id] = doc.data();
+      });
+      return states;
     } catch (error) {
       console.error('Error loading conversation states from Firestore:', error.message);
       return {};
@@ -99,27 +99,21 @@ async function loadConversationStates() {
   } else {
     // Fallback to file-based storage
     try {
-      if (fs.existsSync(CONVERSATION_STATES_FILE)) {
-        const data = fs.readFileSync(CONVERSATION_STATES_FILE, 'utf8');
-        return JSON.parse(data);
-      }
+      const data = fs.readFileSync('simple_conversation_states.json', 'utf8');
+      return JSON.parse(data);
     } catch (error) {
-      console.error('Error loading conversation states from file:', error.message);
+      return {};
     }
-    return {};
   }
 }
 
-// Function to save conversation state for a specific user
-async function saveConversationState(userEmail, conversationState) {
+// Function to save conversation state to Firestore or file
+async function saveConversationState(userEmail, state) {
   if (db) {
     try {
       // Save to Firestore
-      const userDoc = doc(db, 'conversation_states', userEmail);
-      await setDoc(userDoc, {
-        ...conversationState,
-        lastUpdated: new Date().toISOString()
-      });
+      const docRef = doc(db, 'conversation_states', userEmail);
+      await setDoc(docRef, state);
       console.log(`✅ Saved conversation state to Firestore for ${userEmail}`);
     } catch (error) {
       console.error('Error saving conversation state to Firestore:', error.message);
@@ -127,47 +121,40 @@ async function saveConversationState(userEmail, conversationState) {
   } else {
     // Fallback to file-based storage
     try {
-      let conversationStates = {};
-      if (fs.existsSync(CONVERSATION_STATES_FILE)) {
-        const data = fs.readFileSync(CONVERSATION_STATES_FILE, 'utf8');
-        conversationStates = JSON.parse(data);
-      }
-      conversationStates[userEmail] = conversationState;
-      fs.writeFileSync(CONVERSATION_STATES_FILE, JSON.stringify(conversationStates, null, 2));
+      const states = await loadConversationStates();
+      states[userEmail] = state;
+      fs.writeFileSync('simple_conversation_states.json', JSON.stringify(states, null, 2));
     } catch (error) {
       console.error('Error saving conversation state to file:', error.message);
     }
   }
 }
 
-// Function to load conversation state for a specific user
+// Function to load conversation state for a specific user from Firestore or file
 async function loadConversationState(userEmail) {
   if (db) {
     try {
       // Load from Firestore
-      const userDoc = doc(db, 'conversation_states', userEmail);
-      const docSnap = await getDoc(userDoc);
+      const docRef = doc(db, 'conversation_states', userEmail);
+      const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
-        const data = docSnap.data();
         console.log(`✅ Loaded conversation state from Firestore for ${userEmail}`);
-        return data;
+        return docSnap.data();
       }
+      return null;
     } catch (error) {
       console.error('Error loading conversation state from Firestore:', error.message);
+      return null;
     }
   } else {
     // Fallback to file-based storage
     try {
-      if (fs.existsSync(CONVERSATION_STATES_FILE)) {
-        const data = fs.readFileSync(CONVERSATION_STATES_FILE, 'utf8');
-        const conversationStates = JSON.parse(data);
-        return conversationStates[userEmail] || null;
-      }
+      const states = await loadConversationStates();
+      return states[userEmail] || null;
     } catch (error) {
-      console.error('Error loading conversation state from file:', error.message);
+      return null;
     }
   }
-  return null;
 }
 
 // Function to load processed email IDs from Firestore or file
