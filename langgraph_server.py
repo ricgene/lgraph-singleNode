@@ -79,4 +79,4 @@ if __name__ == '__main__':
     print("  GET /health - Health check")
     print("\nPress Ctrl+C to stop the server")
     
-    app.run(host='0.0.0.0', port=8000, debug=True) 
+    app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False) 
