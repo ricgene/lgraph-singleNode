@@ -46,7 +46,10 @@ const PROCESSED_EMAILS_FILE = 'processed_emails.json';
 
 // Track recent user activity to prevent duplicate processing
 const recentUserActivity = new Map(); // userEmail -> timestamp
-const DEDUPLICATION_WINDOW = 30000; // 30 seconds in milliseconds
+const DEDUPLICATION_WINDOW = 60000; // 60 seconds in milliseconds
+
+// Track emails being processed in current session to prevent race conditions
+const processingEmails = new Set(); // email UIDs currently being processed
 
 // Function to check if user has been processed recently
 function isUserRecentlyProcessed(userEmail) {
@@ -61,6 +64,21 @@ function isUserRecentlyProcessed(userEmail) {
   // Update the timestamp
   recentUserActivity.set(userEmail, now);
   return false;
+}
+
+// Function to check if email is currently being processed
+function isEmailBeingProcessed(emailUid) {
+  return processingEmails.has(emailUid);
+}
+
+// Function to mark email as processing
+function markEmailAsProcessing(emailUid) {
+  processingEmails.add(emailUid);
+}
+
+// Function to mark email as finished processing
+function markEmailAsFinished(emailUid) {
+  processingEmails.delete(emailUid);
 }
 
 // Function to load conversation states from Firestore or file
@@ -314,8 +332,14 @@ function checkEmails(conversationStates, processedEmails) {
 
         console.log(`Found ${results.length} new Prizm email replies`);
 
-        // Use markSeen to prevent re-processing
-        const fetch = imap.fetch(results, { bodies: '', markSeen: true });
+        // Use markSeen to prevent re-processing and include UIDs
+        const fetch = imap.fetch(results, { 
+          bodies: '', 
+          markSeen: true, 
+          struct: true,
+          envelope: true,
+          uid: true  // This ensures UIDs are included
+        });
         
         // Track processed messages in this fetch session
         const processedInSession = new Set();
@@ -323,115 +347,143 @@ function checkEmails(conversationStates, processedEmails) {
         fetch.on('message', (msg, seqno) => {
           console.log('Processing message #', seqno);
           
+          // Get the UID for this message
+          const uid = msg.uid;
+          console.log('Message UID:', uid);
+          
           msg.on('body', async (stream) => {
             simpleParser(stream, async (err, parsed) => {
               if (err) throw err;
               
-              // Create a more robust unique identifier for this email
-              const emailId = `${parsed.messageId || 'no-id'}-${parsed.date ? parsed.date.getTime() : 'no-date'}-${parsed.from.text}-${parsed.subject || 'no-subject'}`;
+              // Use IMAP UID as the primary deduplication key (most reliable)
+              // If UID is undefined, fall back to message ID + timestamp
+              const emailUid = uid ? uid.toString() : 
+                `${parsed.messageId || 'no-message-id'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
               
-              console.log('Email ID:', emailId);
+              console.log('=== EMAIL PROCESSING DEBUG ===');
+              console.log('Email UID:', emailUid);
+              console.log('Message ID:', parsed.messageId);
+              console.log('Date:', parsed.date);
+              console.log('From:', parsed.from?.text);
+              console.log('Subject:', parsed.subject);
+              console.log('IMAP UID:', uid);
               console.log('Processed emails count:', processedEmails.size);
               console.log('Processed in session:', processedInSession.size);
+              console.log('Already processed globally:', processedEmails.has(emailUid));
+              console.log('Already processed in session:', processedInSession.has(emailUid));
+              console.log('Currently being processed:', isEmailBeingProcessed(emailUid));
+              console.log('================================');
               
               // Check if we've already processed this email (global or in this session)
-              if (processedEmails.has(emailId) || processedInSession.has(emailId)) {
-                console.log('Skipping already processed email:', emailId);
+              if (processedEmails.has(emailUid) || processedInSession.has(emailUid)) {
+                console.log('Skipping already processed email UID:', emailUid);
+                return;
+              }
+              
+              // Check if this email is currently being processed (race condition prevention)
+              if (isEmailBeingProcessed(emailUid)) {
+                console.log('Skipping email UID currently being processed:', emailUid);
                 return;
               }
               
               // Mark as processed in this session immediately
-              processedInSession.add(emailId);
+              processedInSession.add(emailUid);
+              console.log(`✅ Marked email as processed in session: ${emailUid}`);
               
-              // Extract user's email address
-              const userEmail = parsed.from.text.match(/<(.+)>/)?.[1] || parsed.from.text;
+              // Mark as currently processing to prevent race conditions
+              markEmailAsProcessing(emailUid);
+              console.log(`🔒 Marked email as processing: ${emailUid}`);
               
-              // Skip processing emails from our own address
-              if (userEmail === process.env.GMAIL_USER) {
-                console.log('Skipping email from our own address:', userEmail);
-                return;
-              }
-              
-              // Check if user has been processed recently
-              if (isUserRecentlyProcessed(userEmail)) {
-                return;
-              }
-              
-              // Extract the user's response from the email body
-              // Remove quoted text and email headers to get just the user's response
-              let userResponse = parsed.text || parsed.html || '';
-              
-              // Remove quoted text (lines starting with >)
-              userResponse = userResponse.split('\n')
-                .filter(line => !line.trim().startsWith('>'))
-                .join('\n');
-              
-              // Remove common email headers and signatures
-              userResponse = userResponse.replace(/On .+ wrote:.*$/s, '');
-              userResponse = userResponse.replace(/Best regards,.*$/s, '');
-              userResponse = userResponse.replace(/Helen.*$/s, '');
-              userResponse = userResponse.replace(/Prizm.*$/s, '');
-              userResponse = userResponse.replace(/Real Estate Concierge Service.*$/s, '');
-              userResponse = userResponse.replace(/Please reply to this email.*$/s, '');
-              
-              // Remove any remaining quoted text patterns
-              userResponse = userResponse.replace(/^>.*$/gm, '');
-              userResponse = userResponse.replace(/^On .+ at .+ .+ wrote:$/gm, '');
-              
-              // Clean up the response - remove extra whitespace and empty lines
-              userResponse = userResponse
-                .split('\n')
-                .map(line => line.trim())
-                .filter(line => line.length > 0)
-                .join('\n')
-                .trim();
-              
-              // If the response is empty after cleaning, use a fallback
-              if (!userResponse || userResponse.length === 0) {
-                userResponse = parsed.text || parsed.html || '';
-                // Just take the first few lines as a fallback
-                userResponse = userResponse.split('\n').slice(0, 3).join('\n').trim();
-              }
-              
-              console.log('Processing reply from:', userEmail);
-              console.log('User response:', userResponse.substring(0, 100) + '...');
-              
-              // Get or create conversation state for this user
-              if (!conversationStates[userEmail]) {
-                // Try to load existing state from storage
-                const existingState = await loadConversationState(userEmail);
-                if (existingState) {
-                  conversationStates[userEmail] = existingState;
-                  console.log(`✅ Loaded existing conversation state for ${userEmail}`);
-                } else {
-                  conversationStates[userEmail] = {
-                    conversation_history: "",
-                    is_complete: false,
-                    user_email: userEmail
-                  };
-                  console.log(`✅ Created new conversation state for ${userEmail}`);
+              try {
+                // Extract user's email address
+                const userEmail = parsed.from.text.match(/<(.+)>/)?.[1] || parsed.from.text;
+                
+                // Skip processing emails from our own address
+                if (userEmail === process.env.GMAIL_USER) {
+                  console.log('Skipping email from our own address:', userEmail);
+                  return;
                 }
-              }
-              
-              // Process the user's response through LangGraph
-              const result = await processUserResponse(userEmail, userResponse, conversationStates[userEmail]);
-              
-              // Update conversation state
-              conversationStates[userEmail] = {
-                conversation_history: result.conversation_history,
-                is_complete: result.is_complete,
-                user_email: userEmail
-              };
-              
-              // Save conversation state to storage
-              await saveConversationState(userEmail, conversationStates[userEmail]);
-              
-              // Send the next question if conversation is not complete
-              if (!result.is_complete && result.question) {
-                await sendEmailViaGCP(
-                  userEmail,
-                  `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`,
-                  `Hello!
+                
+                // Check if user has been processed recently
+                if (isUserRecentlyProcessed(userEmail)) {
+                  return;
+                }
+                
+                // Extract the user's response from the email body
+                // Remove quoted text and email headers to get just the user's response
+                let userResponse = parsed.text || parsed.html || '';
+                
+                // Remove quoted text (lines starting with >)
+                userResponse = userResponse.split('\n')
+                  .filter(line => !line.trim().startsWith('>'))
+                  .join('\n');
+                
+                // Remove common email headers and signatures
+                userResponse = userResponse.replace(/On .+ wrote:.*$/s, '');
+                userResponse = userResponse.replace(/Best regards,.*$/s, '');
+                userResponse = userResponse.replace(/Helen.*$/s, '');
+                userResponse = userResponse.replace(/Prizm.*$/s, '');
+                userResponse = userResponse.replace(/Real Estate Concierge Service.*$/s, '');
+                userResponse = userResponse.replace(/Please reply to this email.*$/s, '');
+                
+                // Remove any remaining quoted text patterns
+                userResponse = userResponse.replace(/^>.*$/gm, '');
+                userResponse = userResponse.replace(/^On .+ at .+ .+ wrote:$/gm, '');
+                
+                // Clean up the response - remove extra whitespace and empty lines
+                userResponse = userResponse
+                  .split('\n')
+                  .map(line => line.trim())
+                  .filter(line => line.length > 0)
+                  .join('\n')
+                  .trim();
+                
+                // If the response is empty after cleaning, use a fallback
+                if (!userResponse || userResponse.length === 0) {
+                  userResponse = parsed.text || parsed.html || '';
+                  // Just take the first few lines as a fallback
+                  userResponse = userResponse.split('\n').slice(0, 3).join('\n').trim();
+                }
+                
+                console.log('Processing reply from:', userEmail);
+                console.log('User response:', userResponse.substring(0, 100) + '...');
+                
+                // Get or create conversation state for this user
+                if (!conversationStates[userEmail]) {
+                  // Try to load existing state from storage
+                  const existingState = await loadConversationState(userEmail);
+                  if (existingState) {
+                    conversationStates[userEmail] = existingState;
+                    console.log(`✅ Loaded existing conversation state for ${userEmail}`);
+                  } else {
+                    conversationStates[userEmail] = {
+                      conversation_history: "",
+                      is_complete: false,
+                      user_email: userEmail
+                    };
+                    console.log(`✅ Created new conversation state for ${userEmail}`);
+                  }
+                }
+                
+                // Process the user's response through LangGraph
+                const result = await processUserResponse(userEmail, userResponse, conversationStates[userEmail]);
+                
+                // Update conversation state
+                conversationStates[userEmail] = {
+                  conversation_history: result.conversation_history,
+                  is_complete: result.is_complete,
+                  user_email: userEmail
+                };
+                
+                // Save conversation state to storage
+                await saveConversationState(userEmail, conversationStates[userEmail]);
+                
+                // Send the next question if conversation is not complete
+                if (!result.is_complete && result.question) {
+                  await sendEmailViaGCP(
+                    userEmail,
+                    `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`,
+                    `Hello!
 
 Helen from Prizm here. I have a question for you about your task:
 
@@ -442,20 +494,26 @@ Please reply to this email with your response.
 Best regards,
 Helen
 Prizm Real Estate Concierge Service`
-                );
-              } else if (result.is_complete) {
-                // Send completion message
-                await sendEmailViaGCP(
-                  userEmail,
-                  "Prizm Task Conversation Complete",
-                  "Thank you for your time. We've completed our conversation about your task."
-                );
+                  );
+                } else if (result.is_complete) {
+                  // Send completion message
+                  await sendEmailViaGCP(
+                    userEmail,
+                    "Prizm Task Conversation Complete",
+                    "Thank you for your time. We've completed our conversation about your task."
+                  );
+                }
+                
+                // Mark this email as processed globally
+                processedEmails.add(emailUid);
+                console.log('Processed email reply for:', userEmail);
+                console.log('Total processed emails:', processedEmails.size);
+                
+              } finally {
+                // Always mark as finished processing, even if there was an error
+                markEmailAsFinished(emailUid);
+                console.log(`✅ Marked email as finished processing: ${emailUid}`);
               }
-              
-              // Mark this email as processed globally
-              processedEmails.add(emailId);
-              console.log('Processed email reply for:', userEmail);
-              console.log('Total processed emails:', processedEmails.size);
             });
           });
         });
