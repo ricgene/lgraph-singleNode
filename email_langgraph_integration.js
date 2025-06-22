@@ -51,6 +51,8 @@ const DEDUPLICATION_WINDOW = 60000; // 60 seconds in milliseconds
 // Track emails being processed in current session to prevent race conditions
 const processingEmails = new Set(); // email UIDs currently being processed
 
+const watcherStartTime = Date.now(); // Record watcher start time
+
 // Function to check if user has been processed recently
 function isUserRecentlyProcessed(userEmail) {
   const now = Date.now();
@@ -384,6 +386,20 @@ function checkEmails(conversationStates, processedEmails) {
               if (isEmailBeingProcessed(emailUid)) {
                 console.log('Skipping email UID currently being processed:', emailUid);
                 return;
+              }
+              
+              // Check if email is older than watcher start time
+              const emailDate = parsed.date ? new Date(parsed.date).getTime() : 0;
+              if (emailDate && emailDate < watcherStartTime) {
+                // Move this email to Trash and log it
+                imap.addFlags(msg.attributes.uid, '\\Deleted', (err) => {
+                  if (err) {
+                    console.error('❌ Failed to mark old email for deletion:', err);
+                  } else {
+                    console.log('🗑️ Deleted old email (before watcher start):', parsed.subject, parsed.date, parsed.messageId);
+                  }
+                });
+                return; // Skip processing this email
               }
               
               // Mark as processed in this session immediately
