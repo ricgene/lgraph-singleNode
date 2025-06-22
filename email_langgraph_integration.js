@@ -61,17 +61,11 @@ const watcherStartTime = Date.now(); // Record watcher start time
 
 // Function to check if user has been processed recently
 function isUserRecentlyProcessed(userEmail) {
-  const now = Date.now();
   const lastProcessed = recentUserActivity.get(userEmail);
+  if (!lastProcessed) return false;
   
-  if (lastProcessed && (now - lastProcessed) < DEDUPLICATION_WINDOW) {
-    console.log(`⏰ Skipping email from ${userEmail} - processed ${Math.round((now - lastProcessed) / 1000)}s ago (within ${DEDUPLICATION_WINDOW / 1000}s window)`);
-    return true;
-  }
-  
-  // Update the timestamp
-  recentUserActivity.set(userEmail, now);
-  return false;
+  const timeSinceLastProcessed = Date.now() - lastProcessed;
+  return timeSinceLastProcessed < DEDUPLICATION_WINDOW;
 }
 
 // Function to check if email is currently being processed
@@ -293,14 +287,12 @@ async function processUserResponse(userEmail, userResponse, conversationState) {
 }
 
 // Function to process emails found in a specific folder
-function processEmailsInFolder(results, folderName) {
+function processEmailsInFolder(results, folderName, imap, processedEmails) {
   // Use markSeen to prevent re-processing and include UIDs
   const fetch = imap.fetch(results, { 
-    bodies: '', 
-    markSeen: true, 
-    struct: true,
-    envelope: true,
-    uid: true  // This ensures UIDs are included
+    bodies: '',
+    markSeen: true,
+    struct: true
   });
   
   // Track processed messages in this fetch session
@@ -330,15 +322,15 @@ function processEmailsInFolder(results, folderName) {
         console.log('Subject:', parsed.subject);
         console.log('Folder:', folderName);
         console.log('IMAP UID:', uid);
-        console.log('Processed emails count:', processedEmails.size);
+        console.log('Processed emails count:', processingEmails.size);
         console.log('Processed in session:', processedInSession.size);
-        console.log('Already processed globally:', processedEmails.has(emailUid));
+        console.log('Already processed globally:', processingEmails.has(emailUid));
         console.log('Already processed in session:', processedInSession.has(emailUid));
         console.log('Currently being processed:', isEmailBeingProcessed(emailUid));
         console.log('================================');
         
         // Check if we've already processed this email (global or in this session)
-        if (processedEmails.has(emailUid) || processedInSession.has(emailUid)) {
+        if (processingEmails.has(emailUid) || processedInSession.has(emailUid)) {
           console.log('Skipping already processed email UID:', emailUid);
           return;
         }
@@ -529,9 +521,9 @@ Prizm Real Estate Concierge Service`
           }
           
           // Mark this email as processed globally
-          processedEmails.add(emailUid);
+          processingEmails.add(emailUid);
           console.log('Processed email reply for:', userEmail);
-          console.log('Total processed emails:', processedEmails.size);
+          console.log('Total processed emails:', processingEmails.size);
           
         } finally {
           // Always mark as finished processing, even if there was an error
@@ -609,7 +601,7 @@ function checkEmails(conversationStates, processedEmails) {
           console.log(`Found ${results.length} new Prizm email replies in [Gmail].All Mail`);
           
           // Process the emails found
-          processEmailsInFolder(results, '[Gmail].All Mail');
+          processEmailsInFolder(results, '[Gmail].All Mail', imap, processedEmails);
         });
       }
     });
