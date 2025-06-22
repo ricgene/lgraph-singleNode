@@ -305,7 +305,7 @@ async function processUserResponse(userEmail, userResponse, conversationState) {
 }
 
 // Function to process emails found in a specific folder
-function processEmailsInFolder(results, folderName, imap, processedEmails, conversationStates) {
+function processEmailsInFolder(results, folderName, imap, processedEmails) {
   // Use markSeen to prevent re-processing and include UIDs
   const fetch = imap.fetch(results, { 
     bodies: '',
@@ -439,29 +439,29 @@ function processEmailsInFolder(results, folderName, imap, processedEmails, conve
           console.log('Processing reply from:', userEmail);
           console.log('User response:', userResponse);
           
-          // Get or create conversation state for this user
-          let conversationState = conversationStates[userEmail];
-          if (!conversationState) {
-            conversationState = {
-              conversation_history: "",
-              is_complete: false,
-              user_email: userEmail
-            };
+          // Get existing task conversation from taskAgent1 collection
+          const taskTitle = "Prizm Task Question"; // Default task title for email conversations
+          const existingTask = await getTaskConversation(userEmail, taskTitle);
+          
+          // Create conversation history for LangGraph from taskAgent1 data
+          let conversationHistory = "";
+          if (existingTask && existingTask.taskStartConvo.length > 0) {
+            conversationHistory = existingTask.taskStartConvo
+              .map(turn => `User: ${turn.userMessage}\nAgent: ${turn.agentResponse}`)
+              .join('\n\n');
           }
           
+          // Create temporary conversation state for LangGraph processing
+          const tempConversationState = {
+            conversation_history: conversationHistory,
+            is_complete: false,
+            user_email: userEmail
+          };
+          
           // Process the user's response through LangGraph
-          const result = await processUserResponse(userEmail, userResponse, conversationState);
+          const result = await processUserResponse(userEmail, userResponse, tempConversationState);
           
-          // Update conversation state
-          conversationState.conversation_history = result.conversation_history;
-          conversationState.is_complete = result.is_complete;
-          conversationStates[userEmail] = conversationState;
-          
-          // Save the updated conversation state
-          await saveConversationState(userEmail, conversationState);
-          
-          // Also save to taskAgent1 collection for cloud function architecture
-          const taskTitle = "Prizm Task Question"; // Default task title for email conversations
+          // Save to taskAgent1 collection for cloud function architecture
           await addConversationTurn(
             userEmail, 
             taskTitle, 
@@ -482,10 +482,8 @@ function processEmailsInFolder(results, folderName, imap, processedEmails, conve
               await new Promise(resolve => setTimeout(resolve, waitTime));
             }
             
-            await sendEmailViaGCP(
-              userEmail,
-              `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`,
-              `Hello!
+            const subject = `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`;
+            const body = `Hello!
 
 Helen from Prizm here. I have a question for you about your task:
 
@@ -495,11 +493,18 @@ Please reply to this email with your response.
 
 Best regards,
 Helen
-Prizm Real Estate Concierge Service`
-            );
+Prizm Real Estate Concierge Service`;
             
-            // Update last email sent time
-            updateLastEmailSentTime(userEmail);
+            // Check for duplicate before sending
+            const shouldSend = await updateLastMsgSent(userEmail, taskTitle, subject, body);
+            
+            if (shouldSend) {
+              await sendEmailViaGCP(userEmail, subject, body);
+              // Update last email sent time
+              updateLastEmailSentTime(userEmail);
+            } else {
+              console.log(`🚫 Skipping duplicate email to ${userEmail}`);
+            }
           } else if (result.is_complete) {
             // Check throttle before sending completion email
             const waitTime = enforceStrictThrottle(userEmail);
@@ -508,15 +513,19 @@ Prizm Real Estate Concierge Service`
               await new Promise(resolve => setTimeout(resolve, waitTime));
             }
             
-            // Send completion message
-            await sendEmailViaGCP(
-              userEmail,
-              "Prizm Task Conversation Complete",
-              "Thank you for your time. We've completed our conversation about your task."
-            );
+            const subject = "Prizm Task Conversation Complete";
+            const body = "Thank you for your time. We've completed our conversation about your task.";
             
-            // Update last email sent time
-            updateLastEmailSentTime(userEmail);
+            // Check for duplicate before sending
+            const shouldSend = await updateLastMsgSent(userEmail, taskTitle, subject, body);
+            
+            if (shouldSend) {
+              await sendEmailViaGCP(userEmail, subject, body);
+              // Update last email sent time
+              updateLastEmailSentTime(userEmail);
+            } else {
+              console.log(`🚫 Skipping duplicate completion email to ${userEmail}`);
+            }
           }
           
           // Mark this email content as processed AFTER sending
@@ -546,7 +555,7 @@ Prizm Real Estate Concierge Service`
 }
 
 // Function to check for new emails and process them
-function checkEmails(conversationStates, processedEmails) {
+function checkEmails(processedEmails) {
   const imap = createImapConnection();
 
   imap.once('ready', () => {
@@ -595,7 +604,7 @@ function checkEmails(conversationStates, processedEmails) {
           console.log(`Found ${results.length} new Prizm email replies in INBOX`);
           
           // Process the emails found
-          processEmailsInFolder(results, 'INBOX', imap, processedEmails, conversationStates);
+          processEmailsInFolder(results, 'INBOX', imap, processedEmails);
         });
       }
     });
@@ -616,18 +625,15 @@ function checkEmails(conversationStates, processedEmails) {
 async function startWatchingEmails() {
   console.log('Starting to watch for new Prizm email replies...');
   
-  // Store conversation states for each user
-  const conversationStates = await loadConversationStates();
-  
   // Load previously processed email IDs to prevent duplicates across restarts
   const processedEmails = loadProcessedEmails();
   
   // Check immediately
-  checkEmails(conversationStates, processedEmails);
+  checkEmails(processedEmails);
   
   // Then check every 1 minute (more frequent for better responsiveness)
   const interval = setInterval(() => {
-    checkEmails(conversationStates, processedEmails);
+    checkEmails(processedEmails);
     // Save processed emails periodically to persist across restarts
     saveProcessedEmails(processedEmails);
   }, 1 * 60 * 1000);
@@ -638,7 +644,6 @@ async function startWatchingEmails() {
     // Save processed emails on shutdown
     saveProcessedEmails(processedEmails);
     console.log('Stopped watching for new emails');
-    // Note: We don't need to save all states on shutdown since we save per user
   };
 }
 
@@ -826,6 +831,7 @@ async function addConversationTurn(customerEmail, taskTitle, userMessage, agentR
       status: 'active',
       createdAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
+      lastMsgSent: null,
       taskInfo: {
         title: taskTitle,
         description: 'Task initiated via email',
@@ -845,6 +851,7 @@ async function addConversationTurn(customerEmail, taskTitle, userMessage, agentR
     conversationId: `${customerEmail}-${taskTitle}-${Date.now()}`
   };
   
+  // Append to the entire conversation
   taskAgentState.tasks[taskTitle].taskStartConvo.push(turn);
   taskAgentState.tasks[taskTitle].lastUpdated = new Date().toISOString();
   
@@ -856,7 +863,39 @@ async function addConversationTurn(customerEmail, taskTitle, userMessage, agentR
   return turn;
 }
 
+async function updateLastMsgSent(customerEmail, taskTitle, subject, body) {
+  const taskAgentState = await loadTaskAgentState(customerEmail);
+  
+  if (!taskAgentState.tasks[taskTitle]) {
+    console.error(`Task ${taskTitle} not found for ${customerEmail}`);
+    return false;
+  }
+  
+  // Create hash of the email content for duplicate detection
+  const messageHash = require('crypto').createHash('md5').update(`${subject}${body}`).digest('hex');
+  
+  // Check if this message was already sent
+  if (taskAgentState.tasks[taskTitle].lastMsgSent && 
+      taskAgentState.tasks[taskTitle].lastMsgSent.messageHash === messageHash) {
+    console.log(`🚫 Duplicate message detected for ${customerEmail} - ${taskTitle}`);
+    return false; // Don't send duplicate
+  }
+  
+  // Update lastMsgSent
+  taskAgentState.tasks[taskTitle].lastMsgSent = {
+    timestamp: new Date().toISOString(),
+    subject: subject,
+    body: body,
+    messageHash: messageHash,
+    turnNumber: taskAgentState.tasks[taskTitle].taskStartConvo.length
+  };
+  
+  await saveTaskAgentState(customerEmail, taskAgentState);
+  console.log(`✅ Updated lastMsgSent for ${customerEmail} - ${taskTitle}`);
+  return true; // Safe to send
+}
+
 async function getTaskConversation(customerEmail, taskTitle) {
   const taskAgentState = await loadTaskAgentState(customerEmail);
   return taskAgentState.tasks[taskTitle] || null;
-} 
+}
