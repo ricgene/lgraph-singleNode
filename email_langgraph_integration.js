@@ -36,12 +36,9 @@ console.log('Gmail User:', process.env.GMAIL_USER);
 console.log('App Password length:', process.env.GMAIL_APP_PASSWORD ? process.env.GMAIL_APP_PASSWORD.length : 0);
 console.log('Email Function URL:', process.env.EMAIL_FUNCTION_URL);
 
-// File to store conversation states persistently
-const CONVERSATION_STATES_FILE = 'simple_conversation_states.json';
-// File to store processed email IDs persistently
+// File paths for persistent storage
+const CONVERSATION_STATES_FILE = 'conversation_states.json';
 const PROCESSED_EMAILS_FILE = 'processed_emails.json';
-// File to store email content hashes for duplicate detection
-const EMAIL_CONTENT_BUFFER_FILE = 'email_content_buffer.json';
 
 // Track recent user activity to prevent duplicate processing
 const recentUserActivity = new Map(); // userEmail -> timestamp
@@ -54,7 +51,7 @@ const processingEmails = new Set(); // email UIDs currently being processed
 const lastEmailSentTime = new Map(); // userEmail -> timestamp
 const EMAIL_THROTTLE_MIN_INTERVAL = 3000; // 3 seconds minimum between emails
 
-// Track processed email content with timestamps
+// Track processed email content with timestamps (in-memory only)
 const processedEmailContent = new Map(); // userEmail -> { contentHash: timestamp }
 
 const watcherStartTime = Date.now(); // Record watcher start time
@@ -65,7 +62,9 @@ function isUserRecentlyProcessed(userEmail) {
   if (!lastProcessed) return false;
   
   const timeSinceLastProcessed = Date.now() - lastProcessed;
-  return timeSinceLastProcessed < DEDUPLICATION_WINDOW;
+  const MIN_INTERVAL = 5000; // 5 seconds minimum between processing same user
+  
+  return timeSinceLastProcessed < MIN_INTERVAL;
 }
 
 // Function to check if email is currently being processed
@@ -306,7 +305,7 @@ async function processUserResponse(userEmail, userResponse, conversationState) {
 }
 
 // Function to process emails found in a specific folder
-function processEmailsInFolder(results, folderName, imap, processedEmails) {
+function processEmailsInFolder(results, folderName, imap, processedEmails, conversationStates) {
   // Use markSeen to prevent re-processing and include UIDs
   const fetch = imap.fetch(results, { 
     bodies: '',
@@ -571,19 +570,11 @@ function checkEmails(conversationStates, processedEmails) {
   const imap = createImapConnection();
 
   imap.once('ready', () => {
-    // Search in [Gmail].All Mail folder which contains all emails including Social, Promotions, etc.
-    imap.openBox('[Gmail].All Mail', false, (err, box) => {
+    // Search in INBOX folder since [Gmail].All Mail is not accessible
+    imap.openBox('INBOX', false, (err, box) => {
       if (err) {
-        console.error('Could not open [Gmail].All Mail folder:', err.message);
-        // Fallback to INBOX
-        imap.openBox('INBOX', false, (err, box) => {
-          if (err) {
-            console.error('Could not open INBOX folder:', err.message);
-            imap.end();
-            return;
-          }
-          searchForEmails();
-        });
+        console.error('Could not open INBOX folder:', err.message);
+        imap.end();
         return;
       }
       
@@ -605,7 +596,7 @@ function checkEmails(conversationStates, processedEmails) {
           ['SINCE', imapDate]
         ];
         
-        console.log('Searching in [Gmail].All Mail folder');
+        console.log('Searching in INBOX folder');
         console.log('Search criteria:', searchCriteria);
         
         imap.search(searchCriteria, (err, results) => {
@@ -616,15 +607,15 @@ function checkEmails(conversationStates, processedEmails) {
           }
           
           if (results.length === 0) {
-            console.log('No new Prizm email replies found in [Gmail].All Mail');
+            console.log('No new Prizm email replies found in INBOX');
             imap.end();
             return;
           }
           
-          console.log(`Found ${results.length} new Prizm email replies in [Gmail].All Mail`);
+          console.log(`Found ${results.length} new Prizm email replies in INBOX`);
           
           // Process the emails found
-          processEmailsInFolder(results, '[Gmail].All Mail', imap, processedEmails);
+          processEmailsInFolder(results, 'INBOX', imap, processedEmails, conversationStates);
         });
       }
     });
@@ -758,73 +749,31 @@ if (require.main === module) {
   main();
 }
 
-// Function to clear email buffer file
-function clearEmailBuffer() {
-  try {
-    if (fs.existsSync(EMAIL_CONTENT_BUFFER_FILE)) {
-      fs.unlinkSync(EMAIL_CONTENT_BUFFER_FILE);
-      console.log('🗑️ Cleared email content buffer file');
-    }
-  } catch (error) {
-    console.error('Error clearing email buffer file:', error.message);
-  }
-}
-
-// Function to load email content buffer
-function loadEmailContentBuffer() {
-  try {
-    if (fs.existsSync(EMAIL_CONTENT_BUFFER_FILE)) {
-      const data = fs.readFileSync(EMAIL_CONTENT_BUFFER_FILE, 'utf8');
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error('Error loading email content buffer:', error.message);
-  }
-  return {};
-}
-
-// Function to save email content buffer
-function saveEmailContentBuffer(buffer) {
-  try {
-    fs.writeFileSync(EMAIL_CONTENT_BUFFER_FILE, JSON.stringify(buffer, null, 2));
-  } catch (error) {
-    console.error('Error saving email content buffer:', error.message);
-  }
-}
-
-// Function to check if email content was already processed
+// In-memory email content duplicate detection
 function isEmailContentProcessed(userEmail, emailContent) {
-  const userKey = userEmail.toLowerCase().trim();
-  const userProcessed = processedEmailContent.get(userKey) || {};
+  const userData = processedEmailContent.get(userEmail);
+  if (!userData) return false;
   
-  // Create hash of the email content
-  const contentHash = require('crypto').createHash('md5').update(emailContent.toLowerCase().trim()).digest('hex');
+  const contentHash = require('crypto').createHash('md5').update(emailContent).digest('hex');
+  const lastProcessed = userData[contentHash];
   
-  // Check if this exact content was already processed
-  if (userProcessed[contentHash]) {
-    const processedTime = userProcessed[contentHash];
-    const now = Date.now();
-    const timeSinceProcessed = now - processedTime;
-    
-    console.log(`🚫 Email content already processed for ${userEmail} ${Math.round(timeSinceProcessed/1000)}s ago`);
-    return true;
-  }
+  if (!lastProcessed) return false;
   
-  return false;
+  const timeSinceLastProcessed = Date.now() - lastProcessed;
+  const DEDUPLICATION_WINDOW = 60000; // 1 minute window
+  
+  return timeSinceLastProcessed < DEDUPLICATION_WINDOW;
 }
 
-// Function to mark email content as processed
 function markEmailContentProcessed(userEmail, emailContent) {
-  const userKey = userEmail.toLowerCase().trim();
-  const userProcessed = processedEmailContent.get(userKey) || {};
+  const contentHash = require('crypto').createHash('md5').update(emailContent).digest('hex');
+  const timestamp = Date.now();
   
-  // Create hash of the email content
-  const contentHash = require('crypto').createHash('md5').update(emailContent.toLowerCase().trim()).digest('hex');
+  if (!processedEmailContent.has(userEmail)) {
+    processedEmailContent.set(userEmail, {});
+  }
   
-  // Mark as processed with timestamp
-  userProcessed[contentHash] = Date.now();
-  processedEmailContent.set(userKey, userProcessed);
-  
+  processedEmailContent.get(userEmail)[contentHash] = timestamp;
   console.log(`✅ Marked email content as processed for ${userEmail}`);
 }
 
@@ -849,26 +798,8 @@ function updateLastEmailSentTime(userEmail) {
   console.log(`📧 Updated last email sent time for ${userEmail}`);
 }
 
-// Function to add email content to buffer
+// Simple in-memory email content tracking (no file operations)
 function addEmailContentToBuffer(userEmail, emailContent) {
-  const buffer = loadEmailContentBuffer();
-  const userKey = userEmail.toLowerCase().trim();
-  
-  // Create a simple hash of the email content
-  const contentHash = require('crypto').createHash('md5').update(emailContent.toLowerCase().trim()).digest('hex');
-  
-  if (!buffer[userKey]) {
-    buffer[userKey] = [];
-  }
-  
-  // Add the content hash to the buffer
-  buffer[userKey].push(contentHash);
-  
-  // Keep only the last 10 emails per user to prevent buffer from growing too large
-  if (buffer[userKey].length > 10) {
-    buffer[userKey] = buffer[userKey].slice(-10);
-  }
-  
-  saveEmailContentBuffer(buffer);
+  markEmailContentProcessed(userEmail, emailContent);
   console.log(`📝 Added email content to buffer for ${userEmail}`);
 } 
