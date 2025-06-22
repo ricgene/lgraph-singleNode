@@ -37,9 +37,11 @@ console.log('App Password length:', process.env.GMAIL_APP_PASSWORD ? process.env
 console.log('Email Function URL:', process.env.EMAIL_FUNCTION_URL);
 
 // File to store conversation states persistently
-const CONVERSATION_STATES_FILE = 'conversation_states.json';
+const CONVERSATION_STATES_FILE = 'simple_conversation_states.json';
 // File to store processed email IDs persistently
 const PROCESSED_EMAILS_FILE = 'processed_emails.json';
+// File to store email content hashes for duplicate detection
+const EMAIL_CONTENT_BUFFER_FILE = 'email_content_buffer.json';
 
 // Track recent user activity to prevent duplicate processing
 const recentUserActivity = new Map(); // userEmail -> timestamp
@@ -448,6 +450,12 @@ function checkEmails(conversationStates, processedEmails) {
                   userResponse = userResponse.split('\n').slice(0, 3).join('\n').trim();
                 }
                 
+                // Check if this email content is a duplicate
+                if (isEmailContentDuplicate(userEmail, userResponse)) {
+                  console.log(`🚫 Skipping duplicate email content from ${userEmail}`);
+                  return;
+                }
+                
                 console.log('Processing reply from:', userEmail);
                 console.log('User response:', userResponse.substring(0, 100) + '...');
                 
@@ -481,6 +489,9 @@ function checkEmails(conversationStates, processedEmails) {
                 // Save conversation state to storage
                 await saveConversationState(userEmail, conversationStates[userEmail]);
                 
+                // Clear email buffer before sending agent email (as requested)
+                clearEmailBuffer();
+                
                 // Send the next question if conversation is not complete
                 if (!result.is_complete && result.question) {
                   await sendEmailViaGCP(
@@ -506,6 +517,9 @@ Prizm Real Estate Concierge Service`
                     "Thank you for your time. We've completed our conversation about your task."
                   );
                 }
+                
+                // Add email content to buffer after processing
+                addEmailContentToBuffer(userEmail, userResponse);
                 
                 // Mark this email as processed globally
                 processedEmails.add(emailUid);
@@ -588,6 +602,9 @@ async function startNewConversation(userEmail) {
   // Get the first question from LangGraph
   const result = await processUserResponse(userEmail, "", conversationState);
   
+  // Clear email buffer before sending agent email (as requested)
+  clearEmailBuffer();
+  
   // Send the first question
   if (result.question) {
     await sendEmailViaGCP(
@@ -613,6 +630,9 @@ Prizm Real Estate Concierge Service`
 // Main function to start the email integration
 async function main() {
   console.log('Starting LangGraph Email Integration...');
+  
+  // Clear email buffer file on startup
+  clearEmailBuffer();
   
   try {
     // Start watching for emails
@@ -645,4 +665,83 @@ module.exports = {
 // Run the main function if this file is executed directly
 if (require.main === module) {
   main();
+}
+
+// Function to clear email buffer file
+function clearEmailBuffer() {
+  try {
+    if (fs.existsSync(EMAIL_CONTENT_BUFFER_FILE)) {
+      fs.unlinkSync(EMAIL_CONTENT_BUFFER_FILE);
+      console.log('🗑️ Cleared email content buffer file');
+    }
+  } catch (error) {
+    console.error('Error clearing email buffer file:', error.message);
+  }
+}
+
+// Function to load email content buffer
+function loadEmailContentBuffer() {
+  try {
+    if (fs.existsSync(EMAIL_CONTENT_BUFFER_FILE)) {
+      const data = fs.readFileSync(EMAIL_CONTENT_BUFFER_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Error loading email content buffer:', error.message);
+  }
+  return {};
+}
+
+// Function to save email content buffer
+function saveEmailContentBuffer(buffer) {
+  try {
+    fs.writeFileSync(EMAIL_CONTENT_BUFFER_FILE, JSON.stringify(buffer, null, 2));
+  } catch (error) {
+    console.error('Error saving email content buffer:', error.message);
+  }
+}
+
+// Function to check if email content is duplicate
+function isEmailContentDuplicate(userEmail, emailContent) {
+  const buffer = loadEmailContentBuffer();
+  const userKey = userEmail.toLowerCase().trim();
+  
+  if (!buffer[userKey]) {
+    return false;
+  }
+  
+  // Create a simple hash of the email content
+  const contentHash = require('crypto').createHash('md5').update(emailContent.toLowerCase().trim()).digest('hex');
+  
+  // Check if this exact content was already processed
+  if (buffer[userKey].includes(contentHash)) {
+    console.log(`🚫 Duplicate email content detected for ${userEmail}`);
+    return true;
+  }
+  
+  return false;
+}
+
+// Function to add email content to buffer
+function addEmailContentToBuffer(userEmail, emailContent) {
+  const buffer = loadEmailContentBuffer();
+  const userKey = userEmail.toLowerCase().trim();
+  
+  // Create a simple hash of the email content
+  const contentHash = require('crypto').createHash('md5').update(emailContent.toLowerCase().trim()).digest('hex');
+  
+  if (!buffer[userKey]) {
+    buffer[userKey] = [];
+  }
+  
+  // Add the content hash to the buffer
+  buffer[userKey].push(contentHash);
+  
+  // Keep only the last 10 emails per user to prevent buffer from growing too large
+  if (buffer[userKey].length > 10) {
+    buffer[userKey] = buffer[userKey].slice(-10);
+  }
+  
+  saveEmailContentBuffer(buffer);
+  console.log(`📝 Added email content to buffer for ${userEmail}`);
 } 

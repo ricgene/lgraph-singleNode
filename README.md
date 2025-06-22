@@ -240,3 +240,36 @@ node email_langgraph_integration.js
 ---
 
 **This checkpoint README summarizes the current system state and safe operation.** 
+
+## Current Status
+- **Email integration is working** (Gmail IMAP → Flask API → GCP email function)
+- **Duplicate email issue is fixed** (content-based duplicate detection with buffer clearing)
+- **File-based storage** is used for both conversation state and duplicate email tracking (Firebase is disabled)
+- **Servers must not be started multiple times** (avoid port conflicts and duplicate processing)
+
+## Duplicate Email Detection System
+
+The system now includes a robust duplicate email detection mechanism to prevent sending multiple responses to the same email:
+
+### How It Works
+1. **Content-based Detection**: Each email content is hashed using MD5 and stored in `email_content_buffer.json`
+2. **Buffer Clearing**: The email buffer file is automatically cleared:
+   - **On server startup** - prevents old duplicates from affecting new sessions
+   - **Before sending each agent email** - ensures fresh state for each response
+3. **User-specific Tracking**: Duplicate detection is per-user, so different users can send similar content
+
+### Files Used
+- `email_content_buffer.json` - Stores email content hashes for duplicate detection
+- `processed_emails.json` - Stores IMAP UIDs for technical duplicate prevention
+- `simple_conversation_states.json` - Stores conversation state per user
+
+### Testing
+Run the duplicate detection test:
+```bash
+python test_duplicate_detection.py
+```
+
+This will test:
+- Content-based duplicate detection
+- Buffer clearing functionality
+- Server integration (if Flask server is running)
