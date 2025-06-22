@@ -440,7 +440,7 @@ function processEmailsInFolder(results, folderName, imap, processedEmails, conve
           console.log('User response:', userResponse);
           
           // Get or create conversation state for this user
-          let conversationState = conversationStates.get(userEmail);
+          let conversationState = conversationStates[userEmail];
           if (!conversationState) {
             conversationState = {
               conversation_history: "",
@@ -455,10 +455,20 @@ function processEmailsInFolder(results, folderName, imap, processedEmails, conve
           // Update conversation state
           conversationState.conversation_history = result.conversation_history;
           conversationState.is_complete = result.is_complete;
-          conversationStates.set(userEmail, conversationState);
+          conversationStates[userEmail] = conversationState;
           
           // Save the updated conversation state
           await saveConversationState(userEmail, conversationState);
+          
+          // Also save to taskAgent1 collection for cloud function architecture
+          const taskTitle = "Prizm Task Question"; // Default task title for email conversations
+          await addConversationTurn(
+            userEmail, 
+            taskTitle, 
+            userResponse, 
+            result.question || "Conversation completed", 
+            result.is_complete
+          );
           
           // Update recent user activity
           recentUserActivity.set(userEmail, Date.now());
@@ -772,4 +782,81 @@ function updateLastEmailSentTime(userEmail) {
 function addEmailContentToBuffer(userEmail, emailContent) {
   markEmailContentProcessed(userEmail, emailContent);
   console.log(`📝 Added email content to buffer for ${userEmail}`);
+}
+
+// New functions for taskAgent1 collection
+async function loadTaskAgentState(customerEmail) {
+  if (db) {
+    try {
+      const docRef = doc(db, 'taskAgent1', customerEmail);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        console.log(`✅ Loaded taskAgent1 state from Firestore for ${customerEmail}`);
+        return docSnap.data();
+      }
+      return { customerEmail, tasks: {} };
+    } catch (error) {
+      console.error('Error loading taskAgent1 state from Firestore:', error.message);
+      return { customerEmail, tasks: {} };
+    }
+  } else {
+    return { customerEmail, tasks: {} };
+  }
+}
+
+async function saveTaskAgentState(customerEmail, taskAgentState) {
+  if (db) {
+    try {
+      const docRef = doc(db, 'taskAgent1', customerEmail);
+      await setDoc(docRef, taskAgentState);
+      console.log(`✅ Saved taskAgent1 state to Firestore for ${customerEmail}`);
+    } catch (error) {
+      console.error('Error saving taskAgent1 state to Firestore:', error.message);
+    }
+  }
+}
+
+async function addConversationTurn(customerEmail, taskTitle, userMessage, agentResponse, isComplete = false) {
+  const taskAgentState = await loadTaskAgentState(customerEmail);
+  
+  // Initialize task if it doesn't exist
+  if (!taskAgentState.tasks[taskTitle]) {
+    taskAgentState.tasks[taskTitle] = {
+      taskStartConvo: [],
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      taskInfo: {
+        title: taskTitle,
+        description: 'Task initiated via email',
+        priority: 'medium',
+        assignedAgent: 'taskAgent1'
+      }
+    };
+  }
+  
+  // Add conversation turn
+  const turn = {
+    timestamp: new Date().toISOString(),
+    userMessage: userMessage,
+    agentResponse: agentResponse,
+    turnNumber: taskAgentState.tasks[taskTitle].taskStartConvo.length + 1,
+    isComplete: isComplete,
+    conversationId: `${customerEmail}-${taskTitle}-${Date.now()}`
+  };
+  
+  taskAgentState.tasks[taskTitle].taskStartConvo.push(turn);
+  taskAgentState.tasks[taskTitle].lastUpdated = new Date().toISOString();
+  
+  if (isComplete) {
+    taskAgentState.tasks[taskTitle].status = 'completed';
+  }
+  
+  await saveTaskAgentState(customerEmail, taskAgentState);
+  return turn;
+}
+
+async function getTaskConversation(customerEmail, taskTitle) {
+  const taskAgentState = await loadTaskAgentState(customerEmail);
+  return taskAgentState.tasks[taskTitle] || null;
 } 
