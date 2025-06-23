@@ -258,3 +258,16 @@ def process_email_pubsub(event, context):
 
 # Entry point for Google Cloud Functions
 # In your deployment, set entry_point to 'process_email_pubsub' 
+
+# For local testing with functions framework
+if __name__ == "__main__":
+    import functions_framework
+    
+    @functions_framework.cloud_event
+    def test_function(cloud_event):
+        # Convert cloud event to Pub/Sub event format
+        event = {
+            'data': cloud_event.data.get('message', {}).get('data', '')
+        }
+        context = None
+        return process_email_pubsub(event, context) 
