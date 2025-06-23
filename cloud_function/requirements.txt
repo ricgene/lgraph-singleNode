@@ -10,4 +10,7 @@ requests
 langchain
 langgraph
 openai
-langchain-openai 
+langchain-openai
+
+# For loading .env file during local testing
+python-dotenv 
