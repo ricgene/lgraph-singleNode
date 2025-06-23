@@ -506,18 +506,19 @@ Best regards,
 Helen
 Prizm Real Estate Concierge Service`;
             
-            // Clear the lock BEFORE sending email
-            await clearEmailLock(userEmail, taskTitle);
-            
             // Check for duplicate before sending
             const shouldSend = await updateLastMsgSent(userEmail, taskTitle, subject, body);
             
             if (shouldSend) {
+              // Clear the lock just before sending email
+              await clearEmailLock(userEmail, taskTitle);
               await sendEmailViaGCP(userEmail, subject, body);
               // Update last email sent time
               updateLastEmailSentTime(userEmail);
             } else {
               console.log(`🚫 Skipping duplicate email to ${userEmail}`);
+              // Clear the lock even if we're not sending (duplicate detected)
+              await clearEmailLock(userEmail, taskTitle);
             }
           } else if (result.is_complete) {
             // Check throttle before sending completion email
@@ -530,18 +531,19 @@ Prizm Real Estate Concierge Service`;
             const subject = "Prizm Task Conversation Complete";
             const body = "Thank you for your time. We've completed our conversation about your task.";
             
-            // Clear the lock BEFORE sending email
-            await clearEmailLock(userEmail, taskTitle);
-            
             // Check for duplicate before sending
             const shouldSend = await updateLastMsgSent(userEmail, taskTitle, subject, body);
             
             if (shouldSend) {
+              // Clear the lock just before sending email
+              await clearEmailLock(userEmail, taskTitle);
               await sendEmailViaGCP(userEmail, subject, body);
               // Update last email sent time
               updateLastEmailSentTime(userEmail);
             } else {
               console.log(`🚫 Skipping duplicate completion email to ${userEmail}`);
+              // Clear the lock even if we're not sending (duplicate detected)
+              await clearEmailLock(userEmail, taskTitle);
             }
           } else {
             // No email to send, but clear the lock anyway
