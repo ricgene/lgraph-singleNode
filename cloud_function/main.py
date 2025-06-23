@@ -250,7 +250,7 @@ def process_email_pubsub(event, context):
             question_number = agent_result.get("conversation_history", "").count("Question:")
             
             if should_send_response(user_email, task_title, question_number):
-                subject = f"Prizm Task Question #{question_number}"
+                subject = "Re: Prizm Task Question"
                 body = f"Hello!\n\nHelen from Prizm here. I have a question about your task:\n\n{agent_result['question']}\n\nPlease reply to this email."
                 
                 if update_last_msg_sent(user_email, task_title, subject, body):
