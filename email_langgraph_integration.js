@@ -570,6 +570,19 @@ Prizm Real Estate Concierge Service`;
           console.log('Processed email reply for:', userEmail);
           console.log('Total processed emails:', processingEmails.size);
           
+          // Mark email as processed by adding the "processed" label
+          if (msg.attributes && msg.attributes.uid) {
+            imap.addFlags(msg.attributes.uid, 'processed', (err) => {
+              if (err) {
+                console.error('❌ Failed to add processed label to email:', err);
+              } else {
+                console.log('✅ Added processed label to email UID:', msg.attributes.uid);
+              }
+            });
+          } else {
+            console.log('⚠️ Could not add processed label (no UID available)');
+          }
+          
         } finally {
           // Always mark as finished processing, even if there was an error
           markEmailAsFinished(emailUid);
@@ -604,8 +617,8 @@ function checkEmails(processedEmails) {
       searchForEmails();
       
       function searchForEmails() {
-        // Search criteria - look for ALL UNSEEN emails (no subject or date filters)
-        const searchCriteria = ['UNSEEN'];
+        // Search criteria - look for emails that don't have the "processed" label
+        const searchCriteria = ['UNSEEN', 'NOT', 'KEYWORD', 'processed'];
         
         console.log('Searching in INBOX folder');
         console.log('Search criteria:', searchCriteria);
@@ -618,12 +631,12 @@ function checkEmails(processedEmails) {
           }
           
           if (results.length === 0) {
-            console.log('No new unread emails found in INBOX');
+            console.log('No new unprocessed emails found in INBOX');
             imap.end();
             return;
           }
           
-          console.log(`Found ${results.length} new unread emails in INBOX`);
+          console.log(`Found ${results.length} new unprocessed emails in INBOX`);
           
           // Process the emails found
           processEmailsInFolder(results, 'INBOX', imap, processedEmails);
