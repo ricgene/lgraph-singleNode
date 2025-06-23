@@ -383,6 +383,12 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
           return; // Skip processing this email
         }
         
+        // Check if email already has the "processed" label
+        if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
+          console.log('🚫 Skipping email with "processed" label:', parsed.subject, parsed.messageId);
+          return; // Skip processing this email
+        }
+        
         // Mark as processed in this session immediately
         processedInSession.add(emailUid);
         console.log(`✅ Marked email as processed in session: ${emailUid}`);
@@ -617,8 +623,8 @@ function checkEmails(processedEmails) {
       searchForEmails();
       
       function searchForEmails() {
-        // Search criteria - look for emails that don't have the "processed" label
-        const searchCriteria = ['UNSEEN', 'NOT', 'KEYWORD', 'processed'];
+        // Search criteria - look for ALL emails, we'll filter out processed ones later
+        const searchCriteria = ['ALL'];
         
         console.log('Searching in INBOX folder');
         console.log('Search criteria:', searchCriteria);
@@ -631,12 +637,12 @@ function checkEmails(processedEmails) {
           }
           
           if (results.length === 0) {
-            console.log('No new unprocessed emails found in INBOX');
+            console.log('No emails found in INBOX');
             imap.end();
             return;
           }
           
-          console.log(`Found ${results.length} new unprocessed emails in INBOX`);
+          console.log(`Found ${results.length} emails in INBOX`);
           
           // Process the emails found
           processEmailsInFolder(results, 'INBOX', imap, processedEmails);
@@ -705,10 +711,8 @@ async function startNewConversation(userEmail) {
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
     
-    await sendEmailViaGCP(
-      userEmail,
-      "Prizm Task Question #1",
-      `Hello!
+    const subject = "Prizm Task Question";
+    const body = `Hello,
 
 Helen from Prizm here. I have a question for you about your task:
 
@@ -718,321 +722,36 @@ Please reply to this email with your response.
 
 Best regards,
 Helen
-Prizm Real Estate Concierge Service`
-    );
+Prizm Real Estate Concierge Service`;
     
+    await sendEmailViaGCP(userEmail, subject, body);
     // Update last email sent time
     updateLastEmailSentTime(userEmail);
   }
-  
-  return result;
 }
 
-// Main function to start the email integration
+// Main execution
 async function main() {
-  console.log('Starting LangGraph Email Integration...');
-  
   try {
-    // Start watching for emails
+    console.log('Starting LangGraph Email Integration...');
+    
+    // Start watching for new emails
     const stopWatching = await startWatchingEmails();
     
     console.log('Email integration is running. Press Ctrl+C to stop.');
     
     // Handle graceful shutdown
     process.on('SIGINT', () => {
-      console.log('\nShutting down...');
+      console.log('\nShutting down gracefully...');
       stopWatching();
       process.exit(0);
     });
     
   } catch (error) {
-    console.error('Error starting email integration:', error);
+    console.error('Error in main:', error);
     process.exit(1);
   }
 }
 
-// Export functions for use in other modules
-module.exports = {
-  sendEmailViaGCP,
-  processUserResponse,
-  checkEmails,
-  startWatchingEmails,
-  startNewConversation,
-  markEmailContentProcessed,
-  isEmailContentProcessed,
-  enforceStrictThrottle,
-  updateLastEmailSentTime
-};
-
-// Run the main function if this file is executed directly
-if (require.main === module) {
-  main();
-}
-
-// In-memory email content duplicate detection
-function isEmailContentProcessed(userEmail, emailContent) {
-  const userData = processedEmailContent.get(userEmail);
-  if (!userData) return false;
-  
-  const contentHash = require('crypto').createHash('md5').update(emailContent).digest('hex');
-  const lastProcessed = userData[contentHash];
-  
-  if (!lastProcessed) return false;
-  
-  const timeSinceLastProcessed = Date.now() - lastProcessed;
-  const DEDUPLICATION_WINDOW = 60000; // 1 minute window
-  
-  return timeSinceLastProcessed < DEDUPLICATION_WINDOW;
-}
-
-function markEmailContentProcessed(userEmail, emailContent) {
-  const contentHash = require('crypto').createHash('md5').update(emailContent).digest('hex');
-  const timestamp = Date.now();
-  
-  if (!processedEmailContent.has(userEmail)) {
-    processedEmailContent.set(userEmail, {});
-  }
-  
-  processedEmailContent.get(userEmail)[contentHash] = timestamp;
-  console.log(`✅ Marked email content as processed for ${userEmail}`);
-}
-
-// Function to enforce strict 3-second minimum between emails
-function enforceStrictThrottle(userEmail) {
-  const now = Date.now();
-  const lastSent = lastEmailSentTime.get(userEmail) || 0;
-  const timeSinceLastEmail = now - lastSent;
-  
-  if (timeSinceLastEmail < EMAIL_THROTTLE_MIN_INTERVAL) {
-    const waitTime = EMAIL_THROTTLE_MIN_INTERVAL - timeSinceLastEmail;
-    console.log(`⏰ STRICT THROTTLE: Must wait ${waitTime}ms before sending email to ${userEmail}`);
-    return waitTime;
-  }
-  
-  return 0; // No wait needed
-}
-
-// Function to update last email sent time
-function updateLastEmailSentTime(userEmail) {
-  lastEmailSentTime.set(userEmail, Date.now());
-  console.log(`📧 Updated last email sent time for ${userEmail}`);
-}
-
-// Simple in-memory email content tracking (no file operations)
-function addEmailContentToBuffer(userEmail, emailContent) {
-  markEmailContentProcessed(userEmail, emailContent);
-  console.log(`📝 Added email content to buffer for ${userEmail}`);
-}
-
-// New functions for taskAgent1 collection
-async function loadTaskAgentState(customerEmail) {
-  if (db) {
-    try {
-      const docRef = doc(db, 'taskAgent1', customerEmail);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        console.log(`✅ Loaded taskAgent1 state from Firestore for ${customerEmail}`);
-        return docSnap.data();
-      }
-      return { customerEmail, tasks: {} };
-    } catch (error) {
-      console.error('Error loading taskAgent1 state from Firestore:', error.message);
-      return { customerEmail, tasks: {} };
-    }
-  } else {
-    return { customerEmail, tasks: {} };
-  }
-}
-
-async function saveTaskAgentState(customerEmail, taskAgentState) {
-  if (db) {
-    try {
-      const docRef = doc(db, 'taskAgent1', customerEmail);
-      await setDoc(docRef, taskAgentState);
-      console.log(`✅ Saved taskAgent1 state to Firestore for ${customerEmail}`);
-    } catch (error) {
-      console.error('Error saving taskAgent1 state to Firestore:', error.message);
-    }
-  }
-}
-
-async function addConversationTurn(customerEmail, taskTitle, userMessage, agentResponse, isComplete = false) {
-  const taskAgentState = await loadTaskAgentState(customerEmail);
-  
-  // Initialize task if it doesn't exist
-  if (!taskAgentState.tasks[taskTitle]) {
-    taskAgentState.tasks[taskTitle] = {
-      taskStartConvo: [],
-      emailLock: null, // Initialize emailLock field
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
-      lastMsgSent: null,
-      taskInfo: {
-        title: taskTitle,
-        description: 'Task initiated via email',
-        priority: 'medium',
-        assignedAgent: 'taskAgent1'
-      }
-    };
-  }
-  
-  // Ensure emailLock field exists for existing tasks
-  if (!taskAgentState.tasks[taskTitle].hasOwnProperty('emailLock')) {
-    taskAgentState.tasks[taskTitle].emailLock = null;
-  }
-  
-  // Add conversation turn
-  const turn = {
-    timestamp: new Date().toISOString(),
-    userMessage: userMessage,
-    agentResponse: agentResponse,
-    turnNumber: taskAgentState.tasks[taskTitle].taskStartConvo.length + 1,
-    isComplete: isComplete,
-    conversationId: `${customerEmail}-${taskTitle}-${Date.now()}`
-  };
-  
-  // Append to the entire conversation
-  taskAgentState.tasks[taskTitle].taskStartConvo.push(turn);
-  taskAgentState.tasks[taskTitle].lastUpdated = new Date().toISOString();
-  
-  if (isComplete) {
-    taskAgentState.tasks[taskTitle].status = 'completed';
-  }
-  
-  await saveTaskAgentState(customerEmail, taskAgentState);
-  return turn;
-}
-
-async function shouldSendResponse(customerEmail, taskTitle, questionNumber) {
-  const taskAgentState = await loadTaskAgentState(customerEmail);
-  
-  if (!taskAgentState.tasks[taskTitle]) {
-    return true; // No task exists, safe to send
-  }
-  
-  // If this is question #1, always send
-  if (questionNumber === 1) {
-    return true;
-  }
-  
-  // If this is question #2 or higher, check if we already sent a response to this email
-  // We can determine this by checking if the conversation has more turns than expected
-  const conversationTurns = taskAgentState.tasks[taskTitle].taskStartConvo.length;
-  const expectedTurns = questionNumber - 1; // For question #2, we should have 1 turn
-  
-  if (conversationTurns > expectedTurns) {
-    console.log(`🚫 Already responded to this email. Question #${questionNumber} requested but conversation has ${conversationTurns} turns (expected ${expectedTurns})`);
-    return false;
-  }
-  
-  return true;
-}
-
-async function updateLastMsgSent(customerEmail, taskTitle, subject, body) {
-  const taskAgentState = await loadTaskAgentState(customerEmail);
-  
-  if (!taskAgentState.tasks[taskTitle]) {
-    console.error(`Task ${taskTitle} not found for ${customerEmail}`);
-    return false;
-  }
-  
-  // Create hash of the email content for duplicate detection
-  const messageHash = require('crypto').createHash('md5').update(`${subject}${body}`).digest('hex');
-  
-  // Check if this message was already sent
-  if (taskAgentState.tasks[taskTitle].lastMsgSent && 
-      taskAgentState.tasks[taskTitle].lastMsgSent.messageHash === messageHash) {
-    console.log(`🚫 Duplicate message detected for ${customerEmail} - ${taskTitle}`);
-    return false; // Don't send duplicate
-  }
-  
-  // Update lastMsgSent
-  taskAgentState.tasks[taskTitle].lastMsgSent = {
-    timestamp: new Date().toISOString(),
-    subject: subject,
-    body: body,
-    messageHash: messageHash,
-    turnNumber: taskAgentState.tasks[taskTitle].taskStartConvo.length
-  };
-  
-  await saveTaskAgentState(customerEmail, taskAgentState);
-  console.log(`✅ Updated lastMsgSent for ${customerEmail} - ${taskTitle}`);
-  return true; // Safe to send
-}
-
-async function getTaskConversation(customerEmail, taskTitle) {
-  const taskAgentState = await loadTaskAgentState(customerEmail);
-  return taskAgentState.tasks[taskTitle] || null;
-}
-
-// New functions for distributed locking to prevent duplicate processing
-async function acquireEmailLock(customerEmail, taskTitle) {
-  const taskAgentState = await loadTaskAgentState(customerEmail);
-  
-  // Initialize task if it doesn't exist
-  if (!taskAgentState.tasks[taskTitle]) {
-    taskAgentState.tasks[taskTitle] = {
-      taskStartConvo: [],
-      emailLock: null, // Initialize emailLock field
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
-      lastMsgSent: null,
-      taskInfo: {
-        title: taskTitle,
-        description: 'Task initiated via email',
-        priority: 'medium',
-        assignedAgent: 'taskAgent1'
-      }
-    };
-  }
-  
-  // Ensure emailLock field exists for existing tasks
-  if (!taskAgentState.tasks[taskTitle].hasOwnProperty('emailLock')) {
-    taskAgentState.tasks[taskTitle].emailLock = null;
-  }
-  
-  // Wait random amount of time (0-1 second)
-  const waitTime = Math.random() * 1000;
-  console.log(`⏳ Waiting ${waitTime.toFixed(0)}ms before attempting lock acquisition`);
-  await new Promise(resolve => setTimeout(resolve, waitTime));
-  
-  // Get last 4 digits of high-resolution timestamp
-  const timestamp = Date.now();
-  const last4Digits = timestamp.toString().slice(-4);
-  console.log(`🔒 Attempting to acquire lock with digits: ${last4Digits} (timestamp: ${timestamp})`);
-  
-  // Check if lock is already taken
-  if (taskAgentState.tasks[taskTitle].emailLock !== null) {
-    console.log(`🚫 Lock already taken by another responder: ${taskAgentState.tasks[taskTitle].emailLock}`);
-    return null; // Lock acquisition failed
-  }
-  
-  // Try to acquire the lock
-  taskAgentState.tasks[taskTitle].emailLock = last4Digits;
-  taskAgentState.tasks[taskTitle].lastUpdated = new Date().toISOString();
-  await saveTaskAgentState(customerEmail, taskAgentState);
-  console.log(`✅ Lock acquired: ${last4Digits}`);
-  
-  // Verify we still have the lock (race condition check)
-  const verifyState = await loadTaskAgentState(customerEmail);
-  if (verifyState.tasks[taskTitle].emailLock === last4Digits) {
-    console.log(`✅ Lock verification successful: ${last4Digits}`);
-    return last4Digits; // Lock acquired successfully
-  } else {
-    console.log(`❌ Lock verification failed. Expected: ${last4Digits}, Got: ${verifyState.tasks[taskTitle].emailLock}`);
-    return null; // Lock was taken by another responder
-  }
-}
-
-async function clearEmailLock(customerEmail, taskTitle) {
-  const taskAgentState = await loadTaskAgentState(customerEmail);
-  
-  if (taskAgentState.tasks[taskTitle]) {
-    taskAgentState.tasks[taskTitle].emailLock = null;
-    taskAgentState.tasks[taskTitle].lastUpdated = new Date().toISOString();
-    await saveTaskAgentState(customerEmail, taskAgentState);
-    console.log(`🔓 Cleared email lock for ${customerEmail} - ${taskTitle}`);
-  }
-}
+// Start the application
+main();
