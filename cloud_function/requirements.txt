@@ -1,0 +1,13 @@
+# Google Cloud specific
+google-cloud-firestore
+google-cloud-pubsub
+functions-framework
+
+# For HTTP requests
+requests
+
+# LangGraph and AI dependencies
+langchain
+langgraph
+openai
+langchain-openai 
