@@ -665,12 +665,12 @@ async function startWatchingEmails() {
   // Check immediately
   checkEmails(processedEmails);
   
-  // Then check every 1 minute (more frequent for better responsiveness)
+  // Then check every 10 seconds (more frequent for better responsiveness)
   const interval = setInterval(() => {
     checkEmails(processedEmails);
     // Save processed emails periodically to persist across restarts
     saveProcessedEmails(processedEmails);
-  }, 1 * 60 * 1000);
+  }, 10 * 1000);
   
   // Return function to stop watching
   return () => {

@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import the agent logic
-from agent import run_agent_turn, send_email_via_gcp
+from agent import run_agent_turn
 
 # TODO: Import your LangGraph agent here
 # from your_langgraph_module import run_langgraph_agent
@@ -245,13 +245,16 @@ def process_email_pubsub(event, context):
         # Load conversation state from Firestore
         task_state = load_task_agent_state(user_email)
         previous_agent_state = task_state.get("tasks", {}).get(task_title)
+        print(f"🔍 Loaded previous agent state: {previous_agent_state}")
 
         # Run the agent for one turn
+        print(f"🤖 Calling run_agent_turn with user_input: '{user_response}'")
         agent_result = run_agent_turn(
             user_input=user_response,
             previous_state=previous_agent_state,
             user_email=user_email
         )
+        print(f"🤖 Agent result: {agent_result}")
 
         # Save the new conversation state
         add_conversation_turn(
@@ -264,6 +267,7 @@ def process_email_pubsub(event, context):
 
         # Decide whether to send a response
         if agent_result.get("question") and not agent_result.get("is_complete"):
+            print(f"📧 Should send response: {agent_result.get('question')}")
             if should_send_response(user_email, task_title, None):
                 subject = "AI Assistant Response"
                 body = f"Hello!\n\nHelen from Prizm here. I have a question about your task:\n\n{agent_result['question']}\n\nPlease reply to this email."
@@ -271,14 +275,19 @@ def process_email_pubsub(event, context):
                 if update_last_msg_sent(user_email, task_title, subject, body):
                     # Clear lock just before sending
                     clear_email_lock(user_email, task_title)
+                    print(f"📧 Sending email to {user_email}")
                     send_email_via_gcp(user_email, subject, body)
                 else:
                     print("Skipping email send due to duplicate detection.")
             else:
                 print("Skipping email send due to conversation completion.")
+        else:
+            print(f"🚫 Not sending response - question: {agent_result.get('question')}, is_complete: {agent_result.get('is_complete')}")
 
     except Exception as e:
-        print(f"An error occurred during processing: {e}")
+        print(f"❌ An error occurred during processing: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         # Always ensure the lock is eventually cleared
         clear_email_lock(user_email, task_title)
