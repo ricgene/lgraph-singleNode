@@ -493,7 +493,8 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
               await new Promise(resolve => setTimeout(resolve, waitTime));
             }
             
-            const subject = `Prizm Task Question #${(result.conversation_history.match(/Question:/g) || []).length + 1}`;
+            const questionNumber = (result.conversation_history.match(/Question:/g) || []).length + 1;
+            const subject = `Prizm Task Question #${questionNumber}`;
             const body = `Hello!
 
 Helen from Prizm here. I have a question for you about your task:
@@ -505,6 +506,14 @@ Please reply to this email with your response.
 Best regards,
 Helen
 Prizm Real Estate Concierge Service`;
+            
+            // Check if we should send this response based on question number
+            const shouldSendBasedOnNumber = await shouldSendResponse(userEmail, taskTitle, questionNumber);
+            if (!shouldSendBasedOnNumber) {
+              console.log(`🚫 Skipping question #${questionNumber} - already responded to this email`);
+              await clearEmailLock(userEmail, taskTitle);
+              return;
+            }
             
             // Check for duplicate before sending
             const shouldSend = await updateLastMsgSent(userEmail, taskTitle, subject, body);
@@ -886,6 +895,31 @@ async function addConversationTurn(customerEmail, taskTitle, userMessage, agentR
   
   await saveTaskAgentState(customerEmail, taskAgentState);
   return turn;
+}
+
+async function shouldSendResponse(customerEmail, taskTitle, questionNumber) {
+  const taskAgentState = await loadTaskAgentState(customerEmail);
+  
+  if (!taskAgentState.tasks[taskTitle]) {
+    return true; // No task exists, safe to send
+  }
+  
+  // If this is question #1, always send
+  if (questionNumber === 1) {
+    return true;
+  }
+  
+  // If this is question #2 or higher, check if we already sent a response to this email
+  // We can determine this by checking if the conversation has more turns than expected
+  const conversationTurns = taskAgentState.tasks[taskTitle].taskStartConvo.length;
+  const expectedTurns = questionNumber - 1; // For question #2, we should have 1 turn
+  
+  if (conversationTurns > expectedTurns) {
+    console.log(`🚫 Already responded to this email. Question #${questionNumber} requested but conversation has ${conversationTurns} turns (expected ${expectedTurns})`);
+    return false;
+  }
+  
+  return true;
 }
 
 async function updateLastMsgSent(customerEmail, taskTitle, subject, body) {
