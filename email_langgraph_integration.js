@@ -441,6 +441,17 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
           
           // Get existing task conversation from taskAgent1 collection
           const taskTitle = "Prizm Task Question"; // Default task title for email conversations
+          
+          // Try to acquire email lock to prevent duplicate processing
+          const lockAcquired = await acquireEmailLock(userEmail, taskTitle);
+          if (!lockAcquired) {
+            console.log(`🚫 Failed to acquire lock for ${userEmail} - ${taskTitle}. Another responder is processing this email.`);
+            markEmailAsFinished(emailUid);
+            return;
+          }
+          
+          console.log(`✅ Successfully acquired lock (${lockAcquired}) for ${userEmail} - ${taskTitle}`);
+          
           const existingTask = await getTaskConversation(userEmail, taskTitle);
           
           // Create conversation history for LangGraph from taskAgent1 data
@@ -495,6 +506,9 @@ Best regards,
 Helen
 Prizm Real Estate Concierge Service`;
             
+            // Clear the lock BEFORE sending email
+            await clearEmailLock(userEmail, taskTitle);
+            
             // Check for duplicate before sending
             const shouldSend = await updateLastMsgSent(userEmail, taskTitle, subject, body);
             
@@ -516,6 +530,9 @@ Prizm Real Estate Concierge Service`;
             const subject = "Prizm Task Conversation Complete";
             const body = "Thank you for your time. We've completed our conversation about your task.";
             
+            // Clear the lock BEFORE sending email
+            await clearEmailLock(userEmail, taskTitle);
+            
             // Check for duplicate before sending
             const shouldSend = await updateLastMsgSent(userEmail, taskTitle, subject, body);
             
@@ -526,10 +543,10 @@ Prizm Real Estate Concierge Service`;
             } else {
               console.log(`🚫 Skipping duplicate completion email to ${userEmail}`);
             }
+          } else {
+            // No email to send, but clear the lock anyway
+            await clearEmailLock(userEmail, taskTitle);
           }
-          
-          // Mark this email content as processed AFTER sending
-          markEmailContentProcessed(userEmail, userResponse);
           
           // Mark this email as processed globally
           processingEmails.add(emailUid);
@@ -828,6 +845,7 @@ async function addConversationTurn(customerEmail, taskTitle, userMessage, agentR
   if (!taskAgentState.tasks[taskTitle]) {
     taskAgentState.tasks[taskTitle] = {
       taskStartConvo: [],
+      emailLock: null, // Initialize emailLock field
       status: 'active',
       createdAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
@@ -839,6 +857,11 @@ async function addConversationTurn(customerEmail, taskTitle, userMessage, agentR
         assignedAgent: 'taskAgent1'
       }
     };
+  }
+  
+  // Ensure emailLock field exists for existing tasks
+  if (!taskAgentState.tasks[taskTitle].hasOwnProperty('emailLock')) {
+    taskAgentState.tasks[taskTitle].emailLock = null;
   }
   
   // Add conversation turn
@@ -898,4 +921,75 @@ async function updateLastMsgSent(customerEmail, taskTitle, subject, body) {
 async function getTaskConversation(customerEmail, taskTitle) {
   const taskAgentState = await loadTaskAgentState(customerEmail);
   return taskAgentState.tasks[taskTitle] || null;
+}
+
+// New functions for distributed locking to prevent duplicate processing
+async function acquireEmailLock(customerEmail, taskTitle) {
+  const taskAgentState = await loadTaskAgentState(customerEmail);
+  
+  // Initialize task if it doesn't exist
+  if (!taskAgentState.tasks[taskTitle]) {
+    taskAgentState.tasks[taskTitle] = {
+      taskStartConvo: [],
+      emailLock: null, // Initialize emailLock field
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      lastMsgSent: null,
+      taskInfo: {
+        title: taskTitle,
+        description: 'Task initiated via email',
+        priority: 'medium',
+        assignedAgent: 'taskAgent1'
+      }
+    };
+  }
+  
+  // Ensure emailLock field exists for existing tasks
+  if (!taskAgentState.tasks[taskTitle].hasOwnProperty('emailLock')) {
+    taskAgentState.tasks[taskTitle].emailLock = null;
+  }
+  
+  // Wait random amount of time (0-1 second)
+  const waitTime = Math.random() * 1000;
+  console.log(`⏳ Waiting ${waitTime.toFixed(0)}ms before attempting lock acquisition`);
+  await new Promise(resolve => setTimeout(resolve, waitTime));
+  
+  // Get last 4 digits of high-resolution timestamp
+  const timestamp = Date.now();
+  const last4Digits = timestamp.toString().slice(-4);
+  console.log(`🔒 Attempting to acquire lock with digits: ${last4Digits} (timestamp: ${timestamp})`);
+  
+  // Check if lock is already taken
+  if (taskAgentState.tasks[taskTitle].emailLock !== null) {
+    console.log(`🚫 Lock already taken by another responder: ${taskAgentState.tasks[taskTitle].emailLock}`);
+    return null; // Lock acquisition failed
+  }
+  
+  // Try to acquire the lock
+  taskAgentState.tasks[taskTitle].emailLock = last4Digits;
+  taskAgentState.tasks[taskTitle].lastUpdated = new Date().toISOString();
+  await saveTaskAgentState(customerEmail, taskAgentState);
+  console.log(`✅ Lock acquired: ${last4Digits}`);
+  
+  // Verify we still have the lock (race condition check)
+  const verifyState = await loadTaskAgentState(customerEmail);
+  if (verifyState.tasks[taskTitle].emailLock === last4Digits) {
+    console.log(`✅ Lock verification successful: ${last4Digits}`);
+    return last4Digits; // Lock acquired successfully
+  } else {
+    console.log(`❌ Lock verification failed. Expected: ${last4Digits}, Got: ${verifyState.tasks[taskTitle].emailLock}`);
+    return null; // Lock was taken by another responder
+  }
+}
+
+async function clearEmailLock(customerEmail, taskTitle) {
+  const taskAgentState = await loadTaskAgentState(customerEmail);
+  
+  if (taskAgentState.tasks[taskTitle]) {
+    taskAgentState.tasks[taskTitle].emailLock = null;
+    taskAgentState.tasks[taskTitle].lastUpdated = new Date().toISOString();
+    await saveTaskAgentState(customerEmail, taskAgentState);
+    console.log(`🔓 Cleared email lock for ${customerEmail} - ${taskTitle}`);
+  }
 }
