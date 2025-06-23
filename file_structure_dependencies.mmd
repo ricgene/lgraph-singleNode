@@ -1,0 +1,84 @@
+graph TB
+    %% Root Directory
+    ROOT[lgraph-singleNode-25May16/]
+    
+    %% Main Email Processing Files
+    EMAIL_JS[email_langgraph_integration.js<br/>Main email watcher & processor]
+    PACKAGE_JSON[package.json<br/>Node.js dependencies]
+    
+    %% Cloud Functions
+    CLOUD_FN[cloud_function/]
+    CLOUD_MAIN[cloud_function/main.py<br/>process-incoming-email function]
+    CLOUD_AGENT[cloud_function/agent.py<br/>Agent logic & email sending]
+    
+    %% Simple Email Function
+    SIMPLE_FN[simple_email_function/]
+    SIMPLE_MAIN[simple_email_function/main.py<br/>send-email-simple function]
+    SIMPLE_REQ[simple_email_function/requirements.txt]
+    
+    %% LangGraph Components
+    LANGGRAPH_SERVER[langgraph_server.py<br/>Local LangGraph server]
+    
+    %% Configuration & Environment
+    ENV[.env<br/>Environment variables]
+    ENV_EXAMPLE[.env-example]
+    REQUIREMENTS[requirements.txt<br/>Python dependencies]
+    
+    %% State & Data Files
+    CONV_STATES[simple_conversation_states.json<br/>Local conversation states]
+    PROCESSED_EMAILS[processed_emails.json<br/>Processed email tracking]
+    
+    %% Documentation & Deployment
+    DEPLOY[gcloudFunctionsDeployProcess-incoming.txt<br/>Deployment commands]
+    README[README.md]
+    
+    %% Web Interface
+    STATIC[static/]
+    WEB_UI[static/index.html<br/>Web interface]
+    
+    %% Dependencies
+    EMAIL_JS --> PACKAGE_JSON
+    EMAIL_JS --> ENV
+    EMAIL_JS --> CONV_STATES
+    EMAIL_JS --> PROCESSED_EMAILS
+    
+    CLOUD_MAIN --> CLOUD_AGENT
+    CLOUD_MAIN --> ENV
+    CLOUD_AGENT --> ENV
+    
+    SIMPLE_MAIN --> SIMPLE_REQ
+    SIMPLE_MAIN --> ENV
+    
+    LANGGRAPH_SERVER --> REQUIREMENTS
+    LANGGRAPH_SERVER --> CLOUD_AGENT
+    
+    %% File Structure
+    ROOT --> EMAIL_JS
+    ROOT --> PACKAGE_JSON
+    ROOT --> CLOUD_FN
+    ROOT --> SIMPLE_FN
+    ROOT --> LANGGRAPH_SERVER
+    ROOT --> ENV
+    ROOT --> CONV_STATES
+    ROOT --> PROCESSED_EMAILS
+    ROOT --> DEPLOY
+    ROOT --> STATIC
+    
+    CLOUD_FN --> CLOUD_MAIN
+    CLOUD_FN --> CLOUD_AGENT
+    SIMPLE_FN --> SIMPLE_MAIN
+    SIMPLE_FN --> SIMPLE_REQ
+    STATIC --> WEB_UI
+    
+    %% Styling
+    classDef main fill:#e3f2fd
+    classDef cloud fill:#f3e5f5
+    classDef config fill:#fff3e0
+    classDef data fill:#e8f5e8
+    classDef docs fill:#fce4ec
+    
+    class EMAIL_JS,CLOUD_MAIN,SIMPLE_MAIN,LANGGRAPH_SERVER main
+    class CLOUD_AGENT,SIMPLE_REQ cloud
+    class ENV,PACKAGE_JSON,REQUIREMENTS config
+    class CONV_STATES,PROCESSED_EMAILS data
+    class DEPLOY,README docs 

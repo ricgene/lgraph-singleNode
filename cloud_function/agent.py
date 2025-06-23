@@ -24,7 +24,8 @@ class DeckState:
 
 def send_email_via_gcp(recipient_email: str, subject: str, body: str) -> bool:
     """Sends an email by calling the deployed GCP email function."""
-    email_function_url = os.getenv("EMAIL_FUNCTION_URL")
+    # Use the environment variable for the email function URL
+    email_function_url = os.getenv('EMAIL_FUNCTION_URL', 'https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple')
     if not email_function_url:
         logger.error("❌ EMAIL_FUNCTION_URL not found in environment variables.")
         return False

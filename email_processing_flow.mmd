@@ -1,0 +1,46 @@
+sequenceDiagram
+    participant Gmail as Gmail IMAP
+    participant Watcher as Email Watcher<br/>(email_langgraph_integration.js)
+    participant PubSub as Google Cloud Pub/Sub
+    participant ProcessFn as process-incoming-email<br/>Cloud Function
+    participant Agent as Agent Logic<br/>(agent.py)
+    participant EmailFn as send-email-simple<br/>Cloud Function
+    participant Firebase as Firebase Firestore
+    participant SMTP as Gmail SMTP
+    
+    Note over Gmail,SMTP: Email Processing Flow
+    
+    %% Email arrives
+    Gmail->>Watcher: New email arrives (IMAP)
+    Watcher->>Watcher: Parse email content
+    Watcher->>Watcher: Check for duplicates
+    Watcher->>Watcher: Validate user email
+    
+    %% Publish to Pub/Sub
+    Watcher->>PubSub: Publish message with user response
+    PubSub->>ProcessFn: Trigger cloud function
+    
+    %% Process in Cloud Function
+    ProcessFn->>Firebase: Load conversation state
+    Firebase-->>ProcessFn: Return state (or create new)
+    
+    ProcessFn->>Agent: Call run_agent_turn()
+    Agent->>Agent: Process with OpenAI GPT-4
+    Agent-->>ProcessFn: Return question & state
+    
+    %% Save state and send email
+    ProcessFn->>Firebase: Save updated conversation state
+    ProcessFn->>EmailFn: HTTP POST with email content
+    EmailFn->>SMTP: Send email via Gmail SMTP
+    SMTP-->>EmailFn: Email sent confirmation
+    EmailFn-->>ProcessFn: Success response
+    ProcessFn-->>PubSub: Function completed
+    
+    Note over Gmail,SMTP: Alternative Local Processing (if needed)
+    
+    %% Local processing path
+    Watcher->>Watcher: Check if local processing needed
+    Watcher->>Agent: Direct call to agent logic
+    Agent-->>Watcher: Return response
+    Watcher->>EmailFn: Send response email
+    Watcher->>Firebase: Update conversation state 

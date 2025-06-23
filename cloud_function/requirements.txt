@@ -1,16 +1,22 @@
 # Google Cloud specific
-google-cloud-firestore
-google-cloud-pubsub
-functions-framework
+google-cloud-firestore==2.*
+google-cloud-pubsub==2.*
+functions-framework==3.*
 
 # For HTTP requests
-requests
+requests==2.*
 
 # LangGraph and AI dependencies
-langchain
-langgraph
-openai
-langchain-openai
+langchain==0.*
+langgraph==0.*
+openai==1.*
+langchain-openai==0.*
 
 # For loading .env file during local testing
-python-dotenv 
+python-dotenv
+
+# Google API client library
+google-api-python-client==2.*
+google-auth==2.*
+google-auth-httplib2==0.*
+google-auth-oauthlib==1.* 

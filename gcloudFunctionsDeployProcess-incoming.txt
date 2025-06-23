@@ -2,4 +2,26 @@ gcloud config set project prizmpoc
 cd ~/gitl/lgraph-singleNode-25May16/
 source ./.env
 
-gcloud functions deploy process-incoming-email --gen2 --runtime=python311 --region=us-central1 --source=cloud_function --entry-point=process_email_pubsub --trigger-topic=incoming-messages --memory=512MB --timeout=540s --set-env-vars EMAIL_FUNCTION_URL=https://sendemail-cs64iuly6q-uc.a.run.app,OPENAI_API_KEY=sk-proj-_...
+
+
+I am using this:
+~/gitl/gcp-agent-email2user/email-nm.js
+
+Not sure for things below this line - function send-mail-simple is used:
+...
+
+-------------------
+
+gcloud functions deploy process-incoming-email --gen2 --runtime=python311 --region=us-central1 --source=cloud_function --entry-point=process_email_pubsub --trigger-topic=incoming-messages --memory=512MB --timeout=540s --set-env-vars EMAIL_FUNCTION_URL=https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple,OPENAI_API_KEY=sk-proj-_...
+
+curl -X POST https://us-central1-prizmpoc.cloudfunctions.net/sendEmail -H "Content-Type: application/json" -d '{"to": "richard.genet@gmail.com", "subject": "Debug Test", "body": "Testing what address this actually sends to."}'
+
+gcloud functions logs read --limit=5 --region=us-central1 | grep "Email sent"
+
+cd /home/rgenet/gitl/lgraph-singleNode-25May16/simple_email_function && echo "y" | gcloud functions deploy send-email-simple --gen2 --runtime=python311 --region=us-central1 --source=. --entry-point=send_email_simple --trigger-http --memory=256MB --timeout=60s --set-env-vars GMAIL_USER=foilboi808@gmail.com,GMAIL_APP_PASSWORD=your-app-password-here
+
+# Improved version with better authentication (uncomment when ready):
+# cd /home/rgenet/gitl/lgraph-singleNode-25May16/simple_email_function && echo "y" | gcloud functions deploy send-email-simple --gen2 --runtime=python311 --region=us-central1 --source=. --entry-point=send_email_simple --trigger-http --memory=256MB --timeout=60s --set-env-vars GMAIL_USER=foilboi808@gmail.com --service-account=your-service-account@prizmpoc.iam.gserviceaccount.com
+
+# Test the deployed function:
+# curl -X POST https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple -H "Content-Type: application/json" -d '{"to": "richard.genet@gmail.com", "subject": "Test from Simple Function", "body": "This is a test email from the simple email function."}'

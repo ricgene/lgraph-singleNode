@@ -5,6 +5,14 @@ import time
 import random
 from google.cloud import firestore
 import requests
+from email.mime.text import MIMEText
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Import the agent logic
 from agent import run_agent_turn, send_email_via_gcp
@@ -183,6 +191,26 @@ def update_last_msg_sent(customer_email, task_title, subject, body):
     save_task_agent_state(customer_email, state)
     print(f"✅ Updated lastMsgSent for {customer_email} - {task_title}")
     return True
+
+def send_email_via_gcp(recipient_email: str, subject: str, body: str) -> bool:
+    """Sends an email by calling the deployed GCP email function."""
+    email_function_url = "https://us-central1-prizmpoc.cloudfunctions.net/sendEmail"
+    if not email_function_url:
+        logger.error("❌ EMAIL_FUNCTION_URL not found in environment variables.")
+        return False
+    try:
+        payload = {"to": recipient_email, "subject": subject, "body": body}
+        logger.info(f"📧 Sending email to {recipient_email} with subject: {subject}")
+        response = requests.post(email_function_url, json=payload, timeout=30)
+        if response.status_code == 200:
+            logger.info(f"✅ Email sent successfully to {recipient_email}")
+            return True
+        else:
+            logger.error(f"❌ Email function returned status {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Error calling email function: {e}")
+        return False
 
 # Main entry point for Pub/Sub-triggered Cloud Function
 def process_email_pubsub(event, context):

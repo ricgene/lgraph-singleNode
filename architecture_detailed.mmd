@@ -1,0 +1,87 @@
+graph TB
+    %% External Services
+    GMAIL[Gmail IMAP/SMTP]
+    FIREBASE[(Firebase Firestore)]
+    PUBSUB[Google Cloud Pub/Sub]
+    
+    %% Email Processing Components
+    EMAIL_WATCHER[email_langgraph_integration.js<br/>Email Watcher & Processor]
+    SIMPLE_EMAIL_FN[simple_email_function/main.py<br/>send-email-simple Cloud Function]
+    PROCESS_EMAIL_FN[cloud_function/main.py<br/>process-incoming-email Cloud Function]
+    
+    %% LangGraph Components
+    LANGGRAPH_SERVER[langgraph_server.py<br/>Local LangGraph Server]
+    AGENT_LOGIC[cloud_function/agent.py<br/>Agent Logic & State Management]
+    
+    %% Storage & State
+    CONV_STATES[simple_conversation_states.json<br/>Local Conversation States]
+    PROCESSED_EMAILS[processed_emails.json<br/>Processed Email Tracking]
+    
+    %% User Interface
+    WEB_UI[static/index.html<br/>Web Interface]
+    
+    %% Data Flow Connections
+    
+    %% Email Flow
+    GMAIL -->|IMAP: Monitor Inbox| EMAIL_WATCHER
+    EMAIL_WATCHER -->|HTTP POST| SIMPLE_EMAIL_FN
+    SIMPLE_EMAIL_FN -->|SMTP| GMAIL
+    
+    %% Pub/Sub Flow
+    EMAIL_WATCHER -->|Publish Message| PUBSUB
+    PUBSUB -->|Trigger| PROCESS_EMAIL_FN
+    
+    %% LangGraph Processing
+    PROCESS_EMAIL_FN -->|Import & Call| AGENT_LOGIC
+    LANGGRAPH_SERVER -->|HTTP POST| AGENT_LOGIC
+    
+    %% State Management
+    EMAIL_WATCHER -->|Read/Write| FIREBASE
+    PROCESS_EMAIL_FN -->|Read/Write| FIREBASE
+    EMAIL_WATCHER -->|Fallback| CONV_STATES
+    EMAIL_WATCHER -->|Track| PROCESSED_EMAILS
+    
+    %% Web Interface
+    WEB_UI -->|HTTP| LANGGRAPH_SERVER
+    
+    %% Environment & Configuration
+    ENV[.env<br/>Environment Variables]
+    ENV --> EMAIL_WATCHER
+    ENV --> SIMPLE_EMAIL_FN
+    ENV --> PROCESS_EMAIL_FN
+    
+    %% Styling
+    classDef external fill:#e1f5fe
+    classDef email fill:#f3e5f5
+    classDef langgraph fill:#e8f5e8
+    classDef storage fill:#fff3e0
+    classDef ui fill:#fce4ec
+    
+    class GMAIL,FIREBASE,PUBSUB external
+    class EMAIL_WATCHER,SIMPLE_EMAIL_FN,PROCESS_EMAIL_FN email
+    class LANGGRAPH_SERVER,AGENT_LOGIC langgraph
+    class CONV_STATES,PROCESSED_EMAILS,ENV storage
+    class WEB_UI ui
+    
+    %% Subgraphs for better organization
+    subgraph "Email Processing Pipeline"
+        EMAIL_WATCHER
+        SIMPLE_EMAIL_FN
+        PROCESS_EMAIL_FN
+    end
+    
+    subgraph "LangGraph & AI Processing"
+        LANGGRAPH_SERVER
+        AGENT_LOGIC
+    end
+    
+    subgraph "Data Storage"
+        FIREBASE
+        CONV_STATES
+        PROCESSED_EMAILS
+    end
+    
+    subgraph "External Services"
+        GMAIL
+        PUBSUB
+    end 
