@@ -56,8 +56,6 @@ def acquire_email_lock(customer_email, task_title):
             "taskStartConvo": [],
             "emailLock": None,
             "status": "active",
-            "createdAt": firestore.SERVER_TIMESTAMP,
-            "lastUpdated": firestore.SERVER_TIMESTAMP,
             "lastMsgSent": None,
             "taskInfo": {
                 "title": task_title,
@@ -68,7 +66,6 @@ def acquire_email_lock(customer_email, task_title):
         }
     
     data["tasks"][task_title]["emailLock"] = last4
-    data["tasks"][task_title]["lastUpdated"] = firestore.SERVER_TIMESTAMP
     doc_ref.set(data)
     
     # Verify
@@ -91,7 +88,6 @@ def clear_email_lock(customer_email, task_title):
         data = doc.to_dict()
         if task_title in data.get("tasks", {}):
             data["tasks"][task_title]["emailLock"] = None
-            data["tasks"][task_title]["lastUpdated"] = firestore.SERVER_TIMESTAMP
             doc_ref.set(data)
             print(f"🔓 Cleared email lock for {customer_email} - {task_title}")
     except Exception as e:
@@ -122,8 +118,6 @@ def add_conversation_turn(customer_email, task_title, user_message, agent_respon
         "taskStartConvo": [],
         "emailLock": None,
         "status": "active",
-        "createdAt": firestore.SERVER_TIMESTAMP,
-        "lastUpdated": firestore.SERVER_TIMESTAMP,
         "lastMsgSent": None,
         "taskInfo": {
             "title": task_title,
@@ -135,7 +129,6 @@ def add_conversation_turn(customer_email, task_title, user_message, agent_respon
     
     turn_number = len(task["taskStartConvo"]) + 1
     turn = {
-        "timestamp": firestore.SERVER_TIMESTAMP,
         "userMessage": user_message,
         "agentResponse": agent_response,
         "turnNumber": turn_number,
@@ -144,7 +137,6 @@ def add_conversation_turn(customer_email, task_title, user_message, agent_respon
     }
     
     task["taskStartConvo"].append(turn)
-    task["lastUpdated"] = firestore.SERVER_TIMESTAMP
     if is_complete:
         task["status"] = "completed"
         
@@ -152,19 +144,18 @@ def add_conversation_turn(customer_email, task_title, user_message, agent_respon
     return turn
 
 def should_send_response(customer_email, task_title, question_number):
+    # For the new static subject line approach, always send responses
+    # unless the conversation is complete
     state = load_task_agent_state(customer_email)
     task = state.get("tasks", {}).get(task_title)
     
     if not task:
         return True
-    if question_number == 1:
-        return True
         
-    conversation_turns = len(task.get("taskStartConvo", []))
-    expected_turns = question_number - 1
-    
-    if conversation_turns > expected_turns:
-        print(f"🚫 Already responded. Question #{question_number} vs {conversation_turns} turns.")
+    # Check if the last turn was marked as complete
+    conversation_turns = task.get("taskStartConvo", [])
+    if conversation_turns and conversation_turns[-1].get("isComplete"):
+        print(f"🚫 Conversation is complete for {customer_email} - {task_title}")
         return False
         
     return True
@@ -183,13 +174,11 @@ def update_last_msg_sent(customer_email, task_title, subject, body):
         return False
         
     task["lastMsgSent"] = {
-        "timestamp": firestore.SERVER_TIMESTAMP,
         "subject": subject,
         "body": body,
         "messageHash": message_hash,
         "turnNumber": len(task["taskStartConvo"])
     }
-    task["lastUpdated"] = firestore.SERVER_TIMESTAMP
     
     save_task_agent_state(customer_email, state)
     print(f"✅ Updated lastMsgSent for {customer_email} - {task_title}")
@@ -247,10 +236,8 @@ def process_email_pubsub(event, context):
 
         # Decide whether to send a response
         if agent_result.get("question") and not agent_result.get("is_complete"):
-            question_number = agent_result.get("conversation_history", "").count("Question:")
-            
-            if should_send_response(user_email, task_title, question_number):
-                subject = "Re: Prizm Task Question"
+            if should_send_response(user_email, task_title, None):
+                subject = "AI Assistant Response"
                 body = f"Hello!\n\nHelen from Prizm here. I have a question about your task:\n\n{agent_result['question']}\n\nPlease reply to this email."
                 
                 if update_last_msg_sent(user_email, task_title, subject, body):
@@ -260,7 +247,7 @@ def process_email_pubsub(event, context):
                 else:
                     print("Skipping email send due to duplicate detection.")
             else:
-                print("Skipping email send due to question number logic.")
+                print("Skipping email send due to conversation completion.")
 
     except Exception as e:
         print(f"An error occurred during processing: {e}")
