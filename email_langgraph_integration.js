@@ -604,20 +604,8 @@ function checkEmails(processedEmails) {
       searchForEmails();
       
       function searchForEmails() {
-        // Use today's date in DD-MMM-YYYY format for SINCE
-        const today = new Date();
-        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        const day = today.getDate();
-        const month = months[today.getMonth()];
-        const year = today.getFullYear();
-        const imapDate = `${day}-${month}-${year}`;
-        
-        // Search criteria - look for UNSEEN emails with our subject
-        const searchCriteria = [
-          'UNSEEN', 
-          ['SUBJECT', 'Re: Prizm Task Question'], 
-          ['SINCE', imapDate]
-        ];
+        // Search criteria - look for ALL UNSEEN emails (no subject or date filters)
+        const searchCriteria = ['UNSEEN'];
         
         console.log('Searching in INBOX folder');
         console.log('Search criteria:', searchCriteria);
@@ -630,12 +618,12 @@ function checkEmails(processedEmails) {
           }
           
           if (results.length === 0) {
-            console.log('No new Prizm email replies found in INBOX');
+            console.log('No new unread emails found in INBOX');
             imap.end();
             return;
           }
           
-          console.log(`Found ${results.length} new Prizm email replies in INBOX`);
+          console.log(`Found ${results.length} new unread emails in INBOX`);
           
           // Process the emails found
           processEmailsInFolder(results, 'INBOX', imap, processedEmails);
