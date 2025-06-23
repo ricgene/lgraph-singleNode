@@ -6,6 +6,9 @@ import random
 from google.cloud import firestore
 import requests
 
+# Import the agent logic
+from agent import run_agent_turn, send_email_via_gcp
+
 # TODO: Import your LangGraph agent here
 # from your_langgraph_module import run_langgraph_agent
 
@@ -198,34 +201,73 @@ def process_email_pubsub(event, context):
     if 'data' not in event:
         print('No data in event')
         return
-    payload = base64.b64decode(event['data']).decode('utf-8')
+
     try:
+        payload = base64.b64decode(event['data']).decode('utf-8')
         message = json.loads(payload)
     except Exception as e:
-        print(f'Error decoding message: {e}')
+        print(f'Error decoding Pub/Sub message: {e}')
         return
+
     user_email = message.get('userEmail')
     user_response = message.get('userResponse')
     task_title = message.get('taskTitle', 'Prizm Task Question')
+
     if not user_email or not user_response:
         print('Missing required fields: userEmail, userResponse')
         return
-    print(f'Processing email from: {user_email}')
-    print(f'User response: {user_response}')
-    print(f'Task title: {task_title}')
-    # Acquire lock
+
+    print(f'Processing: {user_email} | Task: {task_title}')
+    
     lock = acquire_email_lock(user_email, task_title)
     if not lock:
-        print('Another responder is processing this email.')
+        print(f'Could not acquire lock for {user_email}, another instance is processing.')
         return
-    # TODO: Load conversation from Firestore
-    # TODO: Run LangGraph agent (call run_langgraph_agent or similar)
-    # TODO: Save conversation turn to Firestore
-    # TODO: Check for duplicate/shouldSend logic
-    # TODO: Clear lock just before sending
-    # TODO: Send response via GCP email function (requests.post to EMAIL_FUNCTION_URL)
-    clear_email_lock(user_email, task_title)
-    print('✅ Processing complete')
+
+    try:
+        # Load conversation state from Firestore
+        task_state = load_task_agent_state(user_email)
+        previous_agent_state = task_state.get("tasks", {}).get(task_title)
+
+        # Run the agent for one turn
+        agent_result = run_agent_turn(
+            user_input=user_response,
+            previous_state=previous_agent_state,
+            user_email=user_email
+        )
+
+        # Save the new conversation state
+        add_conversation_turn(
+            customer_email=user_email,
+            task_title=task_title,
+            user_message=user_response,
+            agent_response=agent_result.get("question", ""),
+            is_complete=agent_result.get("is_complete", False)
+        )
+
+        # Decide whether to send a response
+        if agent_result.get("question") and not agent_result.get("is_complete"):
+            question_number = agent_result.get("conversation_history", "").count("Question:")
+            
+            if should_send_response(user_email, task_title, question_number):
+                subject = f"Prizm Task Question #{question_number}"
+                body = f"Hello!\n\nHelen from Prizm here. I have a question about your task:\n\n{agent_result['question']}\n\nPlease reply to this email."
+                
+                if update_last_msg_sent(user_email, task_title, subject, body):
+                    # Clear lock just before sending
+                    clear_email_lock(user_email, task_title)
+                    send_email_via_gcp(user_email, subject, body)
+                else:
+                    print("Skipping email send due to duplicate detection.")
+            else:
+                print("Skipping email send due to question number logic.")
+
+    except Exception as e:
+        print(f"An error occurred during processing: {e}")
+    finally:
+        # Always ensure the lock is eventually cleared
+        clear_email_lock(user_email, task_title)
+        print('✅ Processing complete.')
 
 # Entry point for Google Cloud Functions
 # In your deployment, set entry_point to 'process_email_pubsub' 

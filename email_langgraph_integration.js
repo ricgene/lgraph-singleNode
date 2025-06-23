@@ -5,6 +5,7 @@ const axios = require('axios');
 const fs = require('fs');
 const { getFirestore, doc, getDoc, setDoc, collection, getDocs } = require('firebase/firestore');
 const { initializeApp } = require('firebase/app');
+const { PubSub } = require('@google-cloud/pubsub');
 require('dotenv').config();
 
 // Initialize Firebase/Firestore if credentials are available
@@ -55,6 +56,9 @@ const EMAIL_THROTTLE_MIN_INTERVAL = 3000; // 3 seconds minimum between emails
 const processedEmailContent = new Map(); // userEmail -> { contentHash: timestamp }
 
 const watcherStartTime = Date.now(); // Record watcher start time
+
+const pubsub = new PubSub();
+const topicName = 'incoming-messages';
 
 // Function to check if user has been processed recently
 function isUserRecentlyProcessed(userEmail) {
@@ -283,24 +287,26 @@ async function sendEmailViaGCP(to, subject, body) {
 
 // Function to call the LangGraph process_message function
 async function processUserResponse(userEmail, userResponse, conversationState) {
+  // Instead of calling a local server, we now publish to Pub/Sub
   try {
-    // Call the LangGraph function (this would be your Python function)
-    // For now, we'll simulate the response
-    const response = await axios.post('http://localhost:8000/process_message', {
-      user_input: userResponse,
-      previous_state: conversationState,
-      user_email: userEmail
-    });
-    
-    return response.data;
-  } catch (error) {
-    console.error('Error calling LangGraph function:', error.message);
-    // Fallback: send a simple acknowledgment
-    return {
-      question: "Thank you for your response. I'm processing your information.",
-      is_complete: false,
-      conversation_history: conversationState.conversation_history + "\nUser: " + userResponse
+    const message = {
+      userEmail: userEmail,
+      userResponse: userResponse,
+      taskTitle: "Prizm Task Question" // Or make this dynamic if needed
     };
+    const dataBuffer = Buffer.from(JSON.stringify(message));
+
+    const messageId = await pubsub.topic(topicName).publishMessage({ data: dataBuffer });
+    console.log(`✅ Message ${messageId} published to topic ${topicName}.`);
+    
+    // The return value might need to be adjusted depending on how the calling code uses it.
+    // For now, we'll return a success indicator.
+    return { success: true, messageId: messageId };
+
+  } catch (error) {
+    console.error(`❌ Error publishing message to ${topicName}:`, error);
+    // Return an error indicator
+    return { success: false, error: error.message };
   }
 }
 
