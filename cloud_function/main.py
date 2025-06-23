@@ -194,7 +194,7 @@ def update_last_msg_sent(customer_email, task_title, subject, body):
 
 def send_email_via_gcp(recipient_email: str, subject: str, body: str) -> bool:
     """Sends an email by calling the deployed GCP email function."""
-    email_function_url = "https://us-central1-prizmpoc.cloudfunctions.net/sendEmail"
+    email_function_url = os.getenv('EMAIL_FUNCTION_URL', 'https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple')
     if not email_function_url:
         logger.error("❌ EMAIL_FUNCTION_URL not found in environment variables.")
         return False
