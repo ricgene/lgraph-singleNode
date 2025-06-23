@@ -365,14 +365,6 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
           return;
         }
         
-        // Check if email is older than watcher start time
-        const emailDate = parsed.date ? new Date(parsed.date).getTime() : 0;
-        if (emailDate && emailDate < watcherStartTime) {
-          // Skip old emails but don't delete them
-          console.log('⏭️ Skipping old email (before watcher start):', parsed.subject, parsed.date, parsed.messageId);
-          return; // Skip processing this email
-        }
-        
         // Check if email has the "processed" label and skip if it does
         if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
           console.log('🚫 Skipping email with \'processed\' label:', parsed.subject, parsed.date, parsed.messageId);
@@ -1243,14 +1235,6 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
         if (isEmailBeingProcessed(emailUid)) {
           console.log('Skipping email UID currently being processed:', emailUid);
           return;
-        }
-        
-        // Check if email is older than watcher start time
-        const emailDate = parsed.date ? new Date(parsed.date).getTime() : 0;
-        if (emailDate && emailDate < watcherStartTime) {
-          // Skip old emails but don't delete them
-          console.log('⏭️ Skipping old email (before watcher start):', parsed.subject, parsed.date, parsed.messageId);
-          return; // Skip processing this email
         }
         
         // Check if email has the "processed" label and skip if it does
