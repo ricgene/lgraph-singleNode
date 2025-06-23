@@ -8,6 +8,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Force new deployment - updated API key
 # In cloud functions, environment variables are set via deployment
 # No need to load from .env file
 
