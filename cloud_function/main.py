@@ -320,25 +320,9 @@ def create_or_get_task_record(user_email, task_title):
     """
     Create a new task record or get existing one with the key structure: userEmail,taskTitle,timestamp
     """
-    # Check if there's an existing active task for this user and title
-    tasks_ref = firestore_client.collection('tasks')
-    existing_tasks = tasks_ref.where('userEmail', '==', user_email)\
-                              .where('status', '==', 'active')\
-                              .limit(5)\
-                              .stream()
-    
-    existing_task = None
-    for task in existing_tasks:
-        task_data = task.to_dict()
-        # Check for EXACT match on task title only
-        if task_data.get('taskTitle') == task_title:
-            existing_task = task_data
-            logger.info(f"📋 Found exact matching task: {existing_task['taskId']} with title: {existing_task.get('taskTitle')}")
-            break
-    
-    if existing_task:
-        logger.info(f"📋 Using existing task: {existing_task['taskId']}")
-        return existing_task['taskId'], existing_task['agentStateKey']
+    # For now, always create a new task to avoid confusion with existing conversations
+    # In the future, we could add logic to detect if we're continuing the same conversation
+    # by checking the last message timestamp or conversation state
     
     # Create new task record
     timestamp = datetime.now().isoformat()
