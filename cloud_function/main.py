@@ -281,7 +281,18 @@ def process_email_pubsub(event, context):
         if agent_result.get("question") and not agent_result.get("is_complete"):
             print(f"📧 Should send response: {agent_result.get('question')}")
             if should_send_response_by_task(task_id):
-                subject = "AI Assistant Response"
+                # Get the current turn number for the subject line
+                task_ref = firestore_client.collection('tasks').document(task_id)
+                task_doc = task_ref.get()
+                if task_doc.exists:
+                    task_data = task_doc.to_dict()
+                    # Count agent responses to get the correct turn number
+                    agent_response_count = sum(1 for turn in task_data.get('conversationHistory', []) if turn.get('agentResponse'))
+                    turn_number = agent_response_count + 1
+                else:
+                    turn_number = 1
+                
+                subject = f"Prizm Task Question #{turn_number}"
                 body = f"Hello!\n\nHelen from Prizm here. I have a question about your task:\n\n{agent_result['question']}\n\nPlease reply to this email."
                 
                 if update_last_msg_sent_by_task(task_id, subject, body):
@@ -396,7 +407,11 @@ def add_conversation_turn_with_task(task_id, user_email, task_title, user_messag
     if 'conversationHistory' not in task_data:
         task_data['conversationHistory'] = []
     
-    turn_number = len(task_data['conversationHistory']) + 1
+    # Calculate turn number based on agent responses (questions) only
+    # Count how many agent responses we've sent so far
+    agent_response_count = sum(1 for turn in task_data['conversationHistory'] if turn.get('agentResponse'))
+    turn_number = agent_response_count + 1
+    
     turn = {
         "userMessage": user_message,
         "agentResponse": agent_response,
