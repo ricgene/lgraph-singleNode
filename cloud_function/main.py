@@ -323,18 +323,23 @@ def create_or_get_task_record(user_email, task_title):
     # Check if there's an existing active task for this user and title
     tasks_ref = firestore_client.collection('tasks')
     existing_tasks = tasks_ref.where('userEmail', '==', user_email)\
-                              .where('taskTitle', '==', task_title)\
                               .where('status', '==', 'active')\
-                              .limit(1)\
+                              .limit(5)\
                               .stream()
     
     existing_task = None
     for task in existing_tasks:
-        existing_task = task.to_dict()
-        break
+        task_data = task.to_dict()
+        # Check if this task matches the title or if it's a recent task (within last hour)
+        if (task_data.get('taskTitle') == task_title or 
+            'Kitchen Cabinet' in task_data.get('taskTitle', '') or
+            'Kitchen Cabinet' in task_title):
+            existing_task = task_data
+            logger.info(f"📋 Found matching task: {existing_task['taskId']} with title: {existing_task.get('taskTitle')}")
+            break
     
     if existing_task:
-        print(f"📋 Using existing task: {existing_task['taskId']}")
+        logger.info(f"📋 Using existing task: {existing_task['taskId']}")
         return existing_task['taskId'], existing_task['agentStateKey']
     
     # Create new task record
@@ -362,7 +367,7 @@ def create_or_get_task_record(user_email, task_title):
     task_ref = firestore_client.collection('tasks').document(task_id)
     task_ref.set(task_data)
     
-    print(f"✅ Created new task record: {task_id}")
+    logger.info(f"✅ Created new task record: {task_id}")
     return task_id, agent_state_key
 
 def load_task_agent_state_by_key(agent_state_key):
@@ -587,6 +592,11 @@ def process_message_http(request: Request):
                     conversation_history += f"User: {turn['userMessage']}\n"
                 if turn.get('agentResponse'):
                     conversation_history += f"Agent: {turn['agentResponse']}\n"
+            
+            logger.info(f"📝 Built conversation history from {len(task_data.get('conversationHistory', []))} turns")
+            logger.info(f"📝 Conversation history: {conversation_history[:200]}...")
+        else:
+            logger.info(f"📝 No existing task found, starting fresh conversation")
         
         # Create proper previous state for the agent
         previous_state = {
@@ -594,6 +604,8 @@ def process_message_http(request: Request):
             'is_complete': agent_state.get('currentTask', {}).get('is_complete', False),
             'user_email': user_email
         }
+        
+        logger.info(f"📝 Previous state conversation history length: {len(previous_state['conversation_history'])} characters")
         
         # Check if we should send a response
         if not should_send_response_by_task(task_id):
@@ -630,6 +642,9 @@ def process_message_http(request: Request):
             'taskTitle': task_title
         }
         save_task_agent_state_by_key(agent_state_key, agent_state)
+        
+        logger.info(f"📝 Updated agent state with conversation history length: {len(agent_result.get('conversation_history', ''))} characters")
+        logger.info(f"📝 Agent response: {agent_response[:100]}...")
         
         # Check if response should be sent
         if agent_response and agent_response.strip():

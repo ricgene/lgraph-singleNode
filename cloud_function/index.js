@@ -357,7 +357,7 @@ exports.processEmail = functions.https.onRequest(async (req, res) => {
     // Send response email if there's a question
     if (result.question && !result.is_complete) {
       const questionNumber = (result.conversation_history.match(/Question:/g) || []).length + 1;
-      const subject = `Prizm Task Question #${questionNumber}`;
+      const subject = `Prizm Task Question`;
       const body = `Hello!
 
 Helen from Prizm here. I have a question for you about your task:

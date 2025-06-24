@@ -320,7 +320,7 @@ Prizm Real Estate Concierge Service"""
         
         send_email(
             state.user_email,
-            f"Prizm Task Question #{turn_count + 1}",
+            f"Prizm Task Question",
             email_body
         )
     
