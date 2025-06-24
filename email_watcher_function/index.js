@@ -58,7 +58,8 @@ async function processEmail(imap, stream, info) {
     // Publish to Pub/Sub
     const messageData = {
       userEmail: from,
-      message: userResponse,
+      userResponse: userResponse,
+      taskTitle: 'Prizm Task Question',
       timestamp: new Date().toISOString(),
       messageId: messageId
     };

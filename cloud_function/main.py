@@ -220,10 +220,14 @@ def process_email_pubsub(event, context):
         return
 
     try:
+        # Pub/Sub automatically base64 encodes the message data
         payload = base64.b64decode(event['data']).decode('utf-8')
+        print(f'📧 Raw payload: {payload}')
         message = json.loads(payload)
+        print(f'📧 Parsed message: {message}')
     except Exception as e:
         print(f'Error decoding Pub/Sub message: {e}')
+        print(f'Event data: {event.get("data", "No data")}')
         return
 
     user_email = message.get('userEmail')
@@ -232,6 +236,7 @@ def process_email_pubsub(event, context):
 
     if not user_email or not user_response:
         print('Missing required fields: userEmail, userResponse')
+        print(f'Received message: {message}')
         return
 
     print(f'Processing: {user_email} | Task: {task_title}')
