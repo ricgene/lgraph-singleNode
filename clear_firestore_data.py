@@ -51,5 +51,29 @@ def clear_firestore_data():
         print(f"❌ Error during cleanup: {e}")
         sys.exit(1)
 
+def delete_task_collections():
+    db = firestore.Client()
+    collections = list(db.collections())
+    task_collections = [col for col in collections if col.id.startswith('task')]
+    if not task_collections:
+        print("No collections starting with 'task' found.")
+        return
+    print("The following collections will be deleted:")
+    for col in task_collections:
+        print(f"- {col.id}")
+    confirm = input("Are you sure you want to delete ALL documents in these collections? (yes/no): ")
+    if confirm.lower() != 'yes':
+        print("Aborted.")
+        return
+    for col in task_collections:
+        docs = list(col.stream())
+        count = 0
+        for doc in docs:
+            doc.reference.delete()
+            count += 1
+        print(f"Deleted {count} documents from collection '{col.id}'")
+    print("Done.")
+
 if __name__ == "__main__":
-    clear_firestore_data() 
+    clear_firestore_data()
+    delete_task_collections() 
