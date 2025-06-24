@@ -292,7 +292,7 @@ def process_email_pubsub(event, context):
                 else:
                     turn_number = 1
                 
-                subject = f"Prizm Task Question #{turn_number}"
+                subject = f"Prizm Task Question"
                 body = f"Hello!\n\nHelen from Prizm here. I have a question about your task:\n\n{agent_result['question']}\n\nPlease reply to this email."
                 
                 if update_last_msg_sent_by_task(task_id, subject, body):
@@ -574,6 +574,27 @@ def process_message_http(request: Request):
         # Load current agent state
         agent_state = load_task_agent_state_by_key(agent_state_key)
         
+        # Build conversation history from task's conversation history
+        task_ref = firestore_client.collection('tasks').document(task_id)
+        task_doc = task_ref.get()
+        conversation_history = ""
+        
+        if task_doc.exists:
+            task_data = task_doc.to_dict()
+            # Build conversation history from previous turns
+            for turn in task_data.get('conversationHistory', []):
+                if turn.get('userMessage'):
+                    conversation_history += f"User: {turn['userMessage']}\n"
+                if turn.get('agentResponse'):
+                    conversation_history += f"Agent: {turn['agentResponse']}\n"
+        
+        # Create proper previous state for the agent
+        previous_state = {
+            'conversation_history': conversation_history,
+            'is_complete': agent_state.get('currentTask', {}).get('is_complete', False),
+            'user_email': user_email
+        }
+        
         # Check if we should send a response
         if not should_send_response_by_task(task_id):
             return jsonify({
@@ -584,9 +605,10 @@ def process_message_http(request: Request):
         
         # Run the agent with correct parameters
         logger.info(f"🤖 Running agent for task {task_id}")
+        logger.info(f"📝 Conversation history length: {len(conversation_history)} characters")
         agent_result = run_agent_turn(
             user_input=user_message,
-            previous_state=agent_state.get('currentTask', {}),
+            previous_state=previous_state,
             user_email=user_email
         )
         
@@ -612,7 +634,7 @@ def process_message_http(request: Request):
         # Check if response should be sent
         if agent_response and agent_response.strip():
             # Send email if response is generated
-            subject = f"Prizm Task Question #{turn['turnNumber'] if turn else 1}"
+            subject = f"Prizm Task Question"
             email_body = f"""Hello!
 
 Helen from Prizm here. I have a question about your task:
