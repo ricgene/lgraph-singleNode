@@ -524,14 +524,32 @@ def process_message_http(request: Request):
         if not request_json:
             return jsonify({'error': 'No JSON data provided'}), 400
         
-        # Extract message data
-        user_email = request_json.get('user_email')
-        user_message = request_json.get('message')
-        task_title = request_json.get('task_title', 'General Task')
-        source = request_json.get('source', 'http_webhook')  # sms, web, etc.
+        # Handle both old format and new format
+        if 'custemail' in request_json:
+            # Old format: Customer Name, custemail, Task, description, etc.
+            user_email = request_json.get('custemail')
+            customer_name = request_json.get('Customer Name', 'Unknown')
+            task_title = request_json.get('Task', 'General Task')
+            description = request_json.get('description', '')
+            category = request_json.get('Category', '')
+            full_address = request_json.get('Full Address', '')
+            task_budget = request_json.get('Task Budget', 0)
+            state = request_json.get('State', '')
+            vendors = request_json.get('vendors', '')
+            
+            # Combine description and vendors as the user message
+            user_message = f"Task: {task_title}\nDescription: {description}\nCategory: {category}\nAddress: {full_address}\nBudget: ${task_budget}\nState: {state}\nVendor Request: {vendors}"
+            
+            source = 'web_form'
+        else:
+            # New format: user_email, message, task_title
+            user_email = request_json.get('user_email')
+            user_message = request_json.get('message')
+            task_title = request_json.get('task_title', 'General Task')
+            source = request_json.get('source', 'http_webhook')
         
         if not user_email or not user_message:
-            return jsonify({'error': 'Missing required fields: user_email, message'}), 400
+            return jsonify({'error': 'Missing required fields: custemail or user_email, and message/description'}), 400
         
         logger.info(f"📨 Received {source} message from {user_email}: {user_message[:50]}...")
         
