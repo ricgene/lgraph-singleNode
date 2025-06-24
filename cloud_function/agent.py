@@ -54,20 +54,27 @@ def run_agent_turn(user_input: str, previous_state: Optional[Dict] = None, user_
     """
     Processes a single turn of the conversation in a stateless manner.
     """
+    logger.info(f"🤖 Starting agent turn for {user_email}")
+    logger.info(f"📝 User input: {user_input[:100]}...")
+    
     # Initialize or restore state
     state = DeckState()
     if previous_state:
         state.conversation_history = previous_state.get('conversation_history', '')
         state.is_complete = previous_state.get('is_complete', False)
         state.user_email = previous_state.get('user_email', user_email)
+        logger.info(f"📝 Restored conversation history length: {len(state.conversation_history)} characters")
     else:
         state.user_email = user_email
+        logger.info(f"📝 Starting fresh conversation for {user_email}")
 
     turn_count = state.conversation_history.count("Question:")
+    logger.info(f"📊 Current turn count: {turn_count}/7")
 
     if turn_count >= 7:
         state.is_complete = True
         final_message = "Thank you for your time. We've reached the maximum number of turns for this conversation."
+        logger.info(f"🏁 Conversation complete - max turns reached")
         if state.user_email:
             send_email_via_gcp(state.user_email, "Prizm Task Conversation Complete", final_message)
         return {
@@ -108,9 +115,12 @@ def run_agent_turn(user_input: str, previous_state: Optional[Dict] = None, user_
     # Invoke the language model
     try:
         logger.info(f"🤖 Invoking LLM with {len(messages)} messages")
+        logger.info(f"📝 System prompt length: {len(system_prompt)} characters")
+        logger.info(f"📝 Conversation history length: {len(state.conversation_history)} characters")
         response = llm.invoke(messages)
         agent_response_text = response.content
         logger.info(f"✅ LLM response received: {len(agent_response_text)} characters")
+        logger.info(f"📝 LLM response preview: {agent_response_text[:200]}...")
     except Exception as e:
         logger.error(f"❌ Error invoking LLM: {e}")
         logger.error(f"❌ Error type: {type(e).__name__}")
@@ -127,13 +137,16 @@ def run_agent_turn(user_input: str, previous_state: Optional[Dict] = None, user_
     # Update conversation history
     new_history_entry = f"User: {user_input}\nAgent: {agent_response_text}\n"
     state.conversation_history += new_history_entry
+    logger.info(f"📝 Updated conversation history length: {len(state.conversation_history)} characters")
     
     # Check for completion keywords
     if "TASK_PROGRESSING" in agent_response_text or "TASK_ESCALATION" in agent_response_text:
         state.is_complete = True
+        logger.info(f"🏁 Conversation complete - detected completion keywords")
 
     # Parse the "Question:" part for the return value
     question_part = agent_response_text.split("Question:")[-1].split("Learned:")[0].strip()
+    logger.info(f"📝 Extracted question: {question_part[:100]}...")
 
     return {
         "question": question_part,

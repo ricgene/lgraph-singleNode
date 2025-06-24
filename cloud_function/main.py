@@ -658,11 +658,16 @@ Helen from Prizm here. I have a question about your task:
 
 Please reply to this email."""
             
+            logger.info(f"📧 Preparing to send email to {user_email}")
+            logger.info(f"📧 Subject: {subject}")
+            logger.info(f"📧 Body preview: {email_body[:100]}...")
+            
             # Check if we should send this email (avoid duplicates)
             if update_last_msg_sent_by_task(task_id, subject, email_body):
+                logger.info(f"📧 Sending email - no duplicate detected")
                 email_sent = send_email_via_gcp(user_email, subject, email_body)
                 if email_sent:
-                    logger.info(f"📧 Email sent to {user_email} for task {task_id}")
+                    logger.info(f"📧 Email sent successfully to {user_email} for task {task_id}")
                 else:
                     logger.error(f"❌ Failed to send email to {user_email} for task {task_id}")
             else:
@@ -681,6 +686,7 @@ Please reply to this email."""
             }
             
             logger.info(f"✅ Processed {source} message for task {task_id}")
+            logger.info(f"📊 Response data: {response_data}")
             return jsonify(response_data), 200
         else:
             return jsonify({
