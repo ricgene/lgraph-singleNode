@@ -596,6 +596,26 @@ def process_message_http(request: Request):
         
         # Check if response should be sent
         if agent_response and agent_response.strip():
+            # Send email if response is generated
+            subject = f"Prizm Task Question #{turn['turnNumber'] if turn else 1}"
+            email_body = f"""Hello!
+
+Helen from Prizm here. I have a question about your task:
+
+{agent_response}
+
+Please reply to this email."""
+            
+            # Check if we should send this email (avoid duplicates)
+            if update_last_msg_sent_by_task(task_id, subject, email_body):
+                email_sent = send_email_via_gcp(user_email, subject, email_body)
+                if email_sent:
+                    logger.info(f"📧 Email sent to {user_email} for task {task_id}")
+                else:
+                    logger.error(f"❌ Failed to send email to {user_email} for task {task_id}")
+            else:
+                logger.info(f"🚫 Skipping duplicate email for task {task_id}")
+            
             # For HTTP webhook, we return the response directly
             # For SMS, you would call your SMS service here
             response_data = {
@@ -604,7 +624,8 @@ def process_message_http(request: Request):
                 'agent_response': agent_response,
                 'turn_number': turn['turnNumber'] if turn else 1,
                 'should_send_response': True,
-                'is_complete': is_complete
+                'is_complete': is_complete,
+                'email_sent': email_sent if 'email_sent' in locals() else False
             }
             
             logger.info(f"✅ Processed {source} message for task {task_id}")
