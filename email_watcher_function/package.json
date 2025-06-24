@@ -1,0 +1,19 @@
+{
+  "name": "email-watcher-function",
+  "version": "1.0.0",
+  "description": "Cloud Function to watch for new emails and publish to Pub/Sub",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "gcloud functions deploy email-watcher --gen2 --runtime=nodejs20 --region=us-central1 --source=. --entry-point=emailWatcher --trigger-http --memory=256MB --timeout=60s"
+  },
+  "dependencies": {
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.5",
+    "@google-cloud/pubsub": "^4.0.0",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": "20"
+  }
+} 

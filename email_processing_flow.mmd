@@ -1,46 +1,53 @@
 sequenceDiagram
+    participant Scheduler as Cloud Scheduler<br/>(email-watcher-job)
+    participant WatcherFunc as email-watcher<br/>Cloud Function
     participant Gmail as Gmail IMAP
-    participant Watcher as Email Watcher<br/>(email_langgraph_integration.js)
     participant PubSub as Google Cloud Pub/Sub
-    participant ProcessFn as process-incoming-email<br/>Cloud Function
+    participant ProcessFunc as process-incoming-email<br/>Cloud Function
     participant Agent as Agent Logic<br/>(agent.py)
-    participant EmailFn as send-email-simple<br/>Cloud Function
+    participant EmailFunc as send-email-simple<br/>Cloud Function
     participant Firebase as Firebase Firestore
     participant SMTP as Gmail SMTP
     
-    Note over Gmail,SMTP: Email Processing Flow
+    Note over Scheduler,SMTP: Deployed Email Processing Flow
     
-    %% Email arrives
-    Gmail->>Watcher: New email arrives (IMAP)
-    Watcher->>Watcher: Parse email content
-    Watcher->>Watcher: Check for duplicates
-    Watcher->>Watcher: Validate user email
+    %% Cloud Scheduler triggers email watcher
+    Scheduler->>WatcherFunc: HTTP POST (every 2 minutes)
+    WatcherFunc->>Gmail: IMAP connection & search
+    Gmail-->>WatcherFunc: Return unread emails
     
-    %% Publish to Pub/Sub
-    Watcher->>PubSub: Publish message with user response
-    PubSub->>ProcessFn: Trigger cloud function
+    alt New emails found
+        WatcherFunc->>WatcherFunc: Parse email content
+        WatcherFunc->>WatcherFunc: Check for duplicates
+        WatcherFunc->>WatcherFunc: Validate user email
+        WatcherFunc->>PubSub: Publish message with user response
+        PubSub->>ProcessFunc: Trigger cloud function
+        
+        %% Process in Cloud Function
+        ProcessFunc->>Firebase: Load conversation state
+        Firebase-->>ProcessFunc: Return state (or create new)
+        
+        ProcessFunc->>Agent: Call run_agent_turn()
+        Agent->>Agent: Process with OpenAI GPT-4
+        Agent-->>ProcessFunc: Return question & state
+        
+        %% Save state and send email
+        ProcessFunc->>Firebase: Save updated conversation state
+        ProcessFunc->>EmailFunc: HTTP POST with email content
+        EmailFunc->>SMTP: Send email via Gmail SMTP
+        SMTP-->>EmailFunc: Email sent confirmation
+        EmailFunc-->>ProcessFunc: Success response
+        ProcessFunc-->>PubSub: Function completed
+    else No new emails
+        WatcherFunc-->>Scheduler: No emails to process
+    end
     
-    %% Process in Cloud Function
-    ProcessFn->>Firebase: Load conversation state
-    Firebase-->>ProcessFn: Return state (or create new)
+    Note over Scheduler,SMTP: Local Development Alternative
     
-    ProcessFn->>Agent: Call run_agent_turn()
-    Agent->>Agent: Process with OpenAI GPT-4
-    Agent-->>ProcessFn: Return question & state
-    
-    %% Save state and send email
-    ProcessFn->>Firebase: Save updated conversation state
-    ProcessFn->>EmailFn: HTTP POST with email content
-    EmailFn->>SMTP: Send email via Gmail SMTP
-    SMTP-->>EmailFn: Email sent confirmation
-    EmailFn-->>ProcessFn: Success response
-    ProcessFn-->>PubSub: Function completed
-    
-    Note over Gmail,SMTP: Alternative Local Processing (if needed)
-    
-    %% Local processing path
-    Watcher->>Watcher: Check if local processing needed
-    Watcher->>Agent: Direct call to agent logic
-    Agent-->>Watcher: Return response
-    Watcher->>EmailFn: Send response email
-    Watcher->>Firebase: Update conversation state 
+    %% Local processing path (for development)
+    Note over WatcherFunc: Local Development
+    WatcherFunc->>WatcherFunc: Check if local processing needed
+    WatcherFunc->>Agent: Direct call to agent logic
+    Agent-->>WatcherFunc: Return response
+    WatcherFunc->>EmailFunc: Send response email
+    WatcherFunc->>Firebase: Update conversation state 

@@ -4,20 +4,20 @@
 graph TD
     User[("User's Mailbox")]
 
-    subgraph "Local System (Watcher)"
-        Watcher["Email Polling Service<br/>(email_langgraph_integration.js)"]
-    end
-    
     subgraph "Google Cloud Platform (GCP)"
+        Scheduler["Cloud Scheduler<br/>(email-watcher-job<br/>Every 2 minutes)"]
+        WatcherFunc["email-watcher<br/>Cloud Function<br/>(Node.js)"]
         PubSub[("Pub/Sub Topic<br/>'incoming-messages'")]
-        CloudFunc["Python Cloud Function<br/>- Distributed Lock Logic<br/>- LangGraph Agent Execution<br/>- Firestore State Management"]
+        ProcessFunc["process-incoming-email<br/>Cloud Function<br/>(Python)"]
+        EmailFunc["send-email-simple<br/>Cloud Function<br/>(Python)"]
         Firestore[("Firestore Database<br/>- Conversation State<br/>- Distributed Locks")]
-        EmailFunc["GCP Email Function<br/>(Sends Agent's Response)"]
     end
 
-    User -- "1. Sends/Receives Email" --- Watcher
-    Watcher -- "2. Publishes event on new email" --> PubSub
-    PubSub -- "3. Triggers Cloud Function" --> CloudFunc
-    CloudFunc -- "4. Reads/Writes State & Locks" <--> Firestore
-    CloudFunc -- "5. Calls Email API" --> EmailFunc
-    EmailFunc -- "6. Sends Final Response" --> User 
+    User -- "1. Sends/Receives Email" --- WatcherFunc
+    Scheduler -- "2. Triggers every 2 min" --> WatcherFunc
+    WatcherFunc -- "3. IMAP Polling" --> User
+    WatcherFunc -- "4. Publishes new emails" --> PubSub
+    PubSub -- "5. Triggers processing" --> ProcessFunc
+    ProcessFunc -- "6. Reads/Writes State" <--> Firestore
+    ProcessFunc -- "7. Calls email function" --> EmailFunc
+    EmailFunc -- "8. SMTP via Gmail" --> User 

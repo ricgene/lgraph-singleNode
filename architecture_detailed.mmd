@@ -4,84 +4,82 @@ graph TB
     FIREBASE[(Firebase Firestore)]
     PUBSUB[Google Cloud Pub/Sub]
     
-    %% Email Processing Components
-    EMAIL_WATCHER[email_langgraph_integration.js<br/>Email Watcher & Processor]
-    SIMPLE_EMAIL_FN[simple_email_function/main.py<br/>send-email-simple Cloud Function]
-    PROCESS_EMAIL_FN[cloud_function/main.py<br/>process-incoming-email Cloud Function]
+    %% Cloud Functions (Deployed)
+    WATCHER_FUNC[email_watcher_function/index.js<br/>email-watcher Cloud Function<br/>(Node.js, HTTP Trigger)]
+    PROCESS_FUNC[cloud_function/main.py<br/>process-incoming-email Cloud Function<br/>(Python, Pub/Sub Trigger)]
+    EMAIL_FUNC[simple_email_function/main.py<br/>send-email-simple Cloud Function<br/>(Python, HTTP Trigger)]
     
-    %% LangGraph Components
-    LANGGRAPH_SERVER[langgraph_server.py<br/>Local LangGraph Server]
+    %% Cloud Scheduler
+    SCHEDULER[Cloud Scheduler<br/>email-watcher-job<br/>(Every 2 minutes)]
+    
+    %% Agent Logic
     AGENT_LOGIC[cloud_function/agent.py<br/>Agent Logic & State Management]
     
-    %% Storage & State
-    CONV_STATES[simple_conversation_states.json<br/>Local Conversation States]
-    PROCESSED_EMAILS[processed_emails.json<br/>Processed Email Tracking]
+    %% Local Development Files (Not Deployed)
+    LOCAL_WATCHER[email_watcher_minimal.js<br/>Local Development Version]
+    LANGGRAPH_SERVER[langgraph_server.py<br/>Local LangGraph Server]
     
-    %% User Interface
-    WEB_UI[static/index.html<br/>Web Interface]
+    %% Configuration & Environment
+    ENV[.env<br/>Environment Variables]
+    DEPLOY_CMDS[gcloudFunctionsDeployProcess-incoming.txt<br/>Deployment Commands]
     
     %% Data Flow Connections
     
-    %% Email Flow
-    GMAIL -->|IMAP: Monitor Inbox| EMAIL_WATCHER
-    EMAIL_WATCHER -->|HTTP POST| SIMPLE_EMAIL_FN
-    SIMPLE_EMAIL_FN -->|SMTP| GMAIL
+    %% Cloud Scheduler Flow
+    SCHEDULER -->|HTTP POST| WATCHER_FUNC
+    WATCHER_FUNC -->|IMAP Polling| GMAIL
+    WATCHER_FUNC -->|Publish Message| PUBSUB
     
-    %% Pub/Sub Flow
-    EMAIL_WATCHER -->|Publish Message| PUBSUB
-    PUBSUB -->|Trigger| PROCESS_EMAIL_FN
-    
-    %% LangGraph Processing
-    PROCESS_EMAIL_FN -->|Import & Call| AGENT_LOGIC
-    LANGGRAPH_SERVER -->|HTTP POST| AGENT_LOGIC
+    %% Pub/Sub Processing Flow
+    PUBSUB -->|Trigger| PROCESS_FUNC
+    PROCESS_FUNC -->|Import & Call| AGENT_LOGIC
+    PROCESS_FUNC -->|HTTP POST| EMAIL_FUNC
+    EMAIL_FUNC -->|SMTP| GMAIL
     
     %% State Management
-    EMAIL_WATCHER -->|Read/Write| FIREBASE
-    PROCESS_EMAIL_FN -->|Read/Write| FIREBASE
-    EMAIL_WATCHER -->|Fallback| CONV_STATES
-    EMAIL_WATCHER -->|Track| PROCESSED_EMAILS
+    PROCESS_FUNC -->|Read/Write| FIREBASE
+    AGENT_LOGIC -->|Read/Write| FIREBASE
     
-    %% Web Interface
-    WEB_UI -->|HTTP| LANGGRAPH_SERVER
+    %% Local Development (Alternative)
+    LOCAL_WATCHER -->|IMAP Polling| GMAIL
+    LOCAL_WATCHER -->|Publish Message| PUBSUB
+    LANGGRAPH_SERVER -->|HTTP POST| AGENT_LOGIC
     
     %% Environment & Configuration
-    ENV[.env<br/>Environment Variables]
-    ENV --> EMAIL_WATCHER
-    ENV --> SIMPLE_EMAIL_FN
-    ENV --> PROCESS_EMAIL_FN
+    ENV --> WATCHER_FUNC
+    ENV --> PROCESS_FUNC
+    ENV --> EMAIL_FUNC
+    ENV --> LOCAL_WATCHER
     
     %% Styling
+    classDef deployed fill:#e8f5e8
     classDef external fill:#e1f5fe
-    classDef email fill:#f3e5f5
-    classDef langgraph fill:#e8f5e8
-    classDef storage fill:#fff3e0
-    classDef ui fill:#fce4ec
+    classDef local fill:#fff3e0
+    classDef config fill:#fce4ec
     
+    class WATCHER_FUNC,PROCESS_FUNC,EMAIL_FUNC,SCHEDULER deployed
     class GMAIL,FIREBASE,PUBSUB external
-    class EMAIL_WATCHER,SIMPLE_EMAIL_FN,PROCESS_EMAIL_FN email
-    class LANGGRAPH_SERVER,AGENT_LOGIC langgraph
-    class CONV_STATES,PROCESSED_EMAILS,ENV storage
-    class WEB_UI ui
+    class LOCAL_WATCHER,LANGGRAPH_SERVER local
+    class ENV,DEPLOY_CMDS config
     
     %% Subgraphs for better organization
-    subgraph "Email Processing Pipeline"
-        EMAIL_WATCHER
-        SIMPLE_EMAIL_FN
-        PROCESS_EMAIL_FN
+    subgraph "Deployed Cloud Functions"
+        WATCHER_FUNC
+        PROCESS_FUNC
+        EMAIL_FUNC
     end
     
-    subgraph "LangGraph & AI Processing"
-        LANGGRAPH_SERVER
-        AGENT_LOGIC
-    end
-    
-    subgraph "Data Storage"
+    subgraph "Cloud Services"
+        SCHEDULER
+        PUBSUB
         FIREBASE
-        CONV_STATES
-        PROCESSED_EMAILS
+    end
+    
+    subgraph "Local Development"
+        LOCAL_WATCHER
+        LANGGRAPH_SERVER
     end
     
     subgraph "External Services"
         GMAIL
-        PUBSUB
     end 
