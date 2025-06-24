@@ -262,6 +262,12 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
           return;
         }
         
+        // Check if email has the "processed" label and skip if it does
+        if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
+          console.log('🚫 Skipping email with \'processed\' label:', parsed.subject, parsed.date, parsed.messageId);
+          return; // Skip processing this email
+        }
+        
         // Generate email UID for tracking
         const emailUid = `${parsed.messageId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         
@@ -275,25 +281,25 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
         console.log('IMAP UID:', msg.attributes?.uid);
         console.log('Processed emails count:', processedEmails.size);
         console.log('Processed in session:', processingEmails.size);
-        console.log('Already processed globally:', processedEmails.has(emailUid));
-        console.log('Already processed in session:', isEmailBeingProcessed(emailUid));
-        console.log('Currently being processed:', isEmailBeingProcessed(emailUid));
+        console.log('Already processed globally:', processedEmails.has(emailUid) || processedEmails.has(parsed.messageId));
+        console.log('Already processed in session:', isEmailBeingProcessed(emailUid) || isEmailBeingProcessed(parsed.messageId));
+        console.log('Currently being processed:', isEmailBeingProcessed(emailUid) || isEmailBeingProcessed(parsed.messageId));
         console.log('================================');
         
-        // Check if email has the "processed" label and skip if it does
-        if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
-          console.log('🚫 Skipping email with \'processed\' label:', parsed.subject, parsed.date, parsed.messageId);
-          return; // Skip processing this email
-        }
+        // Check if already processed (by UID or message ID)
+        const isAlreadyProcessed = processedEmails.has(emailUid) || 
+                                  processedEmails.has(parsed.messageId) || 
+                                  isEmailBeingProcessed(emailUid) ||
+                                  isEmailBeingProcessed(parsed.messageId);
         
-        // Check if already processed
-        if (processedEmails.has(emailUid) || isEmailBeingProcessed(emailUid)) {
-          console.log('🚫 Email already processed or being processed:', emailUid);
+        if (isAlreadyProcessed) {
+          console.log('🚫 Email already processed or being processed:', emailUid, 'or', parsed.messageId);
           return;
         }
         
         // Mark as processing
         markEmailAsProcessing(emailUid);
+        markEmailAsProcessing(parsed.messageId); // Also track by message ID
         console.log(`✅ Marked email as processed in session: ${emailUid}`);
         console.log(`🔒 Marked email as processing: ${emailUid}`);
         
@@ -342,6 +348,7 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
           
           // Mark as processed
           processedEmails.add(emailUid);
+          processedEmails.add(parsed.messageId); // Also track by message ID
           
           // Mark this email as processed globally
           processingEmails.add(emailUid);
@@ -358,7 +365,12 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
               }
             });
           } else {
-            console.log('⚠️ Could not add processed label (no UID available)');
+            console.log('⚠️ Could not add processed label (no UID available) - using message ID tracking instead');
+            // Fallback: track by message ID in our processed emails set
+            if (parsed.messageId) {
+              processedEmails.add(parsed.messageId);
+              console.log('✅ Added message ID to processed tracking:', parsed.messageId);
+            }
           }
           
         } catch (error) {
@@ -367,6 +379,7 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
           // Clear lock
           await clearEmailLock(userEmail, taskTitle);
           markEmailAsFinished(emailUid);
+          markEmailAsFinished(parsed.messageId); // Also clear message ID tracking
           console.log(`✅ Marked email as finished processing: ${emailUid}`);
         }
       });
