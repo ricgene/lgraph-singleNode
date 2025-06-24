@@ -330,12 +330,10 @@ def create_or_get_task_record(user_email, task_title):
     existing_task = None
     for task in existing_tasks:
         task_data = task.to_dict()
-        # Check if this task matches the title or if it's a recent task (within last hour)
-        if (task_data.get('taskTitle') == task_title or 
-            'Kitchen Cabinet' in task_data.get('taskTitle', '') or
-            'Kitchen Cabinet' in task_title):
+        # Check for EXACT match on task title only
+        if task_data.get('taskTitle') == task_title:
             existing_task = task_data
-            logger.info(f"📋 Found matching task: {existing_task['taskId']} with title: {existing_task.get('taskTitle')}")
+            logger.info(f"📋 Found exact matching task: {existing_task['taskId']} with title: {existing_task.get('taskTitle')}")
             break
     
     if existing_task:
