@@ -667,4 +667,25 @@ if __name__ == "__main__":
             'data': cloud_event.data.get('message', {}).get('data', '')
         }
         context = None
-        return process_email_pubsub(event, context) 
+        return process_email_pubsub(event, context)
+
+# Cloud Run compatibility - Flask app
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route('/', methods=['POST'])
+def cloud_run_http_handler():
+    """Cloud Run HTTP handler that wraps the Cloud Function logic"""
+    return process_message_http(request)
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for Cloud Run"""
+    return jsonify({'status': 'healthy'}), 200
+
+# For Cloud Run deployment
+if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port) 
