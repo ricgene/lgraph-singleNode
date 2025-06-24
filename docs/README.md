@@ -67,6 +67,52 @@ Send an email to your Gmail account with subject "Re: Prizm Task Question" and t
 3. Send a follow-up question via email
 4. Continue the conversation for up to 7 turns
 
+#### Test Commands
+
+```bash
+# Test HTTP webhook with full web form payload (all fields)
+curl -X POST https://process-message-http-cs64iuly6q-uc.a.run.app \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Customer Name": "Richard Genet",
+    "custemail": "richard.genet@gmail.com",
+    "Appemail": "richard.genet@gmail.com",
+    "Posted": "2025-06-24T00:00:00.000Z",
+    "If Due Date": "2025-06-25T00:00:00.000Z",
+    "Task": "Kitchen Cabinet Installation",
+    "description": "I need help with installing new kitchen cabinets",
+    "Category": "Home Improvement",
+    "Full Address": "123 Main Street",
+    "Task Budget": 5000,
+    "State": "CA",
+    "vendors": "Looking for recommendations"
+  }'
+
+# Test HTTP webhook with simple format
+curl -X POST https://us-central1-prizmpoc.cloudfunctions.net/process-message-http \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_email": "richard.genet@gmail.com",
+    "task_title": "Prizm Task Question",
+    "user_message": "Hello, I am ready to discuss my task"
+  }'
+
+# Test email sending function
+curl -X POST https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple \
+  -H "Content-Type: application/json" \
+  -d '{"to": "test@example.com", "subject": "Test", "body": "Test message"}'
+```
+
+## 🚧 Known Issues & Tech Debt
+
+### Email Title Numbering
+The email subject line numbering is not perfectly synchronized with the actual conversation turn count. This is due to:
+- Race conditions between multiple email processing instances
+- Inconsistent counting logic between HTTP and email-based processing
+- Need for better state management for turn numbering
+
+**Status**: 🔄 Low Priority - System functions correctly but numbering may be off by ±1
+
 ## 📁 Project Structure
 
 ```
