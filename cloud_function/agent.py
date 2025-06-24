@@ -14,7 +14,12 @@ logger = logging.getLogger(__name__)
 
 # --- Dependencies for the agent ---
 
-llm = ChatOpenAI(model="gpt-4", temperature=0)
+llm = ChatOpenAI(
+    model="gpt-4", 
+    temperature=0,
+    timeout=60,  # 60 second timeout
+    max_retries=3  # Retry up to 3 times
+)
 
 class DeckState:
     """A class to hold the state of the conversation."""
@@ -102,11 +107,22 @@ def run_agent_turn(user_input: str, previous_state: Optional[Dict] = None, user_
 
     # Invoke the language model
     try:
+        logger.info(f"🤖 Invoking LLM with {len(messages)} messages")
         response = llm.invoke(messages)
         agent_response_text = response.content
+        logger.info(f"✅ LLM response received: {len(agent_response_text)} characters")
     except Exception as e:
-        logger.error(f"Error invoking LLM: {e}")
-        agent_response_text = "I'm sorry, I encountered an issue. Could you please repeat that?"
+        logger.error(f"❌ Error invoking LLM: {e}")
+        logger.error(f"❌ Error type: {type(e).__name__}")
+        # Provide more specific error messages based on the exception type
+        if "timeout" in str(e).lower():
+            agent_response_text = "I'm sorry, the request timed out. Please try again."
+        elif "connection" in str(e).lower():
+            agent_response_text = "I'm sorry, there was a connection issue. Please try again."
+        elif "api_key" in str(e).lower():
+            agent_response_text = "I'm sorry, there was an authentication issue. Please contact support."
+        else:
+            agent_response_text = "I'm sorry, I encountered an issue. Could you please repeat that?"
 
     # Update conversation history
     new_history_entry = f"User: {user_input}\nAgent: {agent_response_text}\n"

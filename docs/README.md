@@ -244,3 +244,29 @@ This project is for educational and demonstration purposes.
 
 **Last Updated**: June 2025  
 **Status**: ✅ Production Ready - Fully deployed on Google Cloud Functions
+
+### Tech Debt / To Be Done
+
+**Cloud Functions to Delete (Legacy, Duplicates, or Deprecated):**
+
+- `FirebaseStorageWebhook` (firebase-related, legacy)
+- `processEmailAndStoreInFirebase2` (firebase-related, legacy)
+- `dialogflowWebhook` (legacy Dialogflow integration)
+- `hello-world`, `hello-world2`, `helloWorld`, `helloWorldJS`, `hello_http` (test/hello world functions)
+- `sheet-monitor`, `sheet_monitor`, `sheetEmail1` (old sheet integrations)
+- `processGmailMsgs` (offline, legacy Gmail processor)
+- `glide2mail` (legacy integration)
+- `pinecone-search` (offline, legacy vector search)
+- `api`, `ai-api-handler` (old/duplicate API handlers)
+- `processInputAndInitiateSession`, `processJsonAndInitiateSession` (old session handlers)
+- `upload_file` (legacy upload handler)
+- `process_pdf` (legacy PDF handler)
+- `askq-main`, `askq_main`, `ask_question` (old/duplicate question handlers)
+- Any other function not part of the current, documented flow
+
+**How to clean up:**
+- Use `gcloud functions delete FUNCTION_NAME --region=us-central1` for each.
+- Double-check you are not deleting any function still referenced in your current flow.
+
+**Note:**
+- This list includes v1/v2, firebase, and other legacy/duplicate functions found in your project. Review before deleting.
