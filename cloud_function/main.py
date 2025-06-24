@@ -354,13 +354,11 @@ def create_or_get_task_record(user_email, task_title):
 
 def load_task_agent_state_by_key(agent_state_key):
     """
-    Load agent state using the new key structure
+    Load agent state using the new key structure - make it task-specific
     """
     try:
-        # For now, we'll use the user email as the document key
-        # but store the task-specific data in a subcollection or nested structure
-        user_email = agent_state_key.split('_')[1]  # Extract email from key
-        doc_ref = firestore_client.collection('taskAgent1').document(user_email)
+        # Use the full agent_state_key as the document key to make it task-specific
+        doc_ref = firestore_client.collection('taskAgent1').document(agent_state_key)
         doc = doc_ref.get()
         
         if doc.exists:
@@ -369,7 +367,7 @@ def load_task_agent_state_by_key(agent_state_key):
             # Initialize new state
             return {
                 "currentTask": {},
-                "userEmail": user_email,
+                "agentStateKey": agent_state_key,
                 "createdAt": datetime.now().isoformat()
             }
     except Exception as e:
@@ -433,11 +431,11 @@ def add_conversation_turn_with_task(task_id, user_email, task_title, user_messag
 
 def save_task_agent_state_by_key(agent_state_key, state):
     """
-    Save agent state using the new key structure
+    Save agent state using the new key structure - make it task-specific
     """
     try:
-        user_email = agent_state_key.split('_')[1]  # Extract email from key
-        doc_ref = firestore_client.collection('taskAgent1').document(user_email)
+        # Use the full agent_state_key as the document key to make it task-specific
+        doc_ref = firestore_client.collection('taskAgent1').document(agent_state_key)
         doc_ref.set(state, merge=True)
     except Exception as e:
         print(f"Error saving task agent state: {e}")
