@@ -1,4 +1,0 @@
-name: customer-service-agent
-description: A customer service agent that conducts progressive questioning using LangGraph
-entrypoint: agent2.py:graph
-runtime: inmem 
