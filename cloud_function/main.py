@@ -258,63 +258,98 @@ def process_email_pubsub(event, context):
         previous_agent_state = task_state.get("currentTask", {})
         print(f"🔍 Loaded previous agent state: {previous_agent_state}")
 
-        # Run the agent for one turn
-        print(f"🤖 Calling run_agent_turn with user_input: '{user_response}'")
+        # Log the conversation state being passed to agent
+        logger.info(f"🤖 Passing conversation history to agent:")
+        logger.info(f"📝 History length: {len(conversation_history)} characters")
+        logger.info(f"📝 Is complete: {agent_state.get('currentTask', {}).get('is_complete', False)}")
+        logger.info(f"📝 Turn number: {len(task_data.get('conversationHistory', [])) + 1 if task_doc.exists else 1}")
+        
+        # Run the agent with correct parameters
+        logger.info(f"🤖 Running agent for task {task_id}")
+        logger.info(f"📝 Conversation history length: {len(conversation_history)} characters")
         agent_result = run_agent_turn(
             user_input=user_response,
-            previous_state=previous_agent_state,
+            previous_state=previous_state,
             user_email=user_email
         )
-        print(f"🤖 Agent result: {agent_result}")
-
-        # Save the new conversation state with task reference
-        add_conversation_turn_with_task(
-            task_id=task_id,
-            user_email=user_email,
-            task_title=task_title,
-            user_message=user_response,
-            agent_response=agent_result.get("question", ""),
-            is_complete=agent_result.get("is_complete", False)
+        
+        # Extract the agent's question from the result
+        agent_response = agent_result.get('question', 'I apologize, but I encountered an issue processing your message.')
+        is_complete = agent_result.get('is_complete', False)
+        
+        # Add conversation turn
+        turn = add_conversation_turn_with_task(
+            task_id, user_email, task_title, user_response, agent_response, is_complete
         )
+        
+        # Update agent state with the FULL conversation history from the task
+        agent_state['currentTask'] = {
+            'conversation_history': conversation_history,  # Use the built conversation string
+            'is_complete': is_complete,
+            'user_email': user_email,
+            'taskId': task_id,
+            'taskTitle': task_title
+        }
+        save_task_agent_state_by_key(agent_state_key, agent_state)
+        
+        # Save the updated agent state with full conversation history
+        logger.info(f"💾 Saved agent state with conversation history length: {len(conversation_history)} characters")
+        
+        logger.info(f"📝 Updated agent state with conversation history length: {len(agent_result.get('conversation_history', ''))} characters")
+        logger.info(f"📝 Agent response: {agent_response[:100]}...")
+        
+        # Check if response should be sent
+        if agent_response and agent_response.strip():
+            # Send email if response is generated
+            subject = f"Prizm Task Question"
+            email_body = f"""Hello!
 
-        # Decide whether to send a response
-        if agent_result.get("question") and not agent_result.get("is_complete"):
-            print(f"📧 Should send response: {agent_result.get('question')}")
-            if should_send_response_by_task(task_id):
-                # Get the current turn number for the subject line
-                task_ref = firestore_client.collection('tasks').document(task_id)
-                task_doc = task_ref.get()
-                if task_doc.exists:
-                    task_data = task_doc.to_dict()
-                    # Count agent responses to get the correct turn number
-                    agent_response_count = sum(1 for turn in task_data.get('conversationHistory', []) if turn.get('agentResponse'))
-                    turn_number = agent_response_count + 1
+Helen from Prizm here. I have a question about your task:
+
+{agent_response}
+
+Please reply to this email."""
+            
+            logger.info(f"📧 Preparing to send email to {user_email}")
+            logger.info(f"📧 Subject: {subject}")
+            logger.info(f"📧 Body preview: {email_body[:100]}...")
+            
+            # Check if we should send this email (avoid duplicates)
+            if update_last_msg_sent_by_task(task_id, subject, email_body):
+                logger.info(f"📧 Sending email - no duplicate detected")
+                email_sent = send_email_via_gcp(user_email, subject, email_body)
+                if email_sent:
+                    logger.info(f"📧 Email sent successfully to {user_email} for task {task_id}")
                 else:
-                    turn_number = 1
-                
-                subject = f"Prizm Task Question"
-                body = f"Hello!\n\nHelen from Prizm here. I have a question about your task:\n\n{agent_result['question']}\n\nPlease reply to this email."
-                
-                if update_last_msg_sent_by_task(task_id, subject, body):
-                    # Clear lock just before sending
-                    clear_email_lock(user_email, task_title)
-                    print(f"📧 Sending email to {user_email}")
-                    send_email_via_gcp(user_email, subject, body)
-                else:
-                    print("Skipping email send due to duplicate detection.")
+                    logger.error(f"❌ Failed to send email to {user_email} for task {task_id}")
             else:
-                print("Skipping email send due to conversation completion.")
+                logger.info(f"🚫 Skipping duplicate email for task {task_id}")
+            
+            # For HTTP webhook, we return the response directly
+            # For SMS, you would call your SMS service here
+            response_data = {
+                'status': 'success',
+                'task_id': task_id,
+                'agent_response': agent_response,
+                'turn_number': turn['turnNumber'] if turn else 1,
+                'should_send_response': True,
+                'is_complete': is_complete,
+                'email_sent': email_sent if 'email_sent' in locals() else False
+            }
+            
+            logger.info(f"✅ Processed {source} message for task {task_id}")
+            logger.info(f"📊 Response data: {response_data}")
+            return jsonify(response_data), 200
         else:
-            print(f"🚫 Not sending response - question: {agent_result.get('question')}, is_complete: {agent_result.get('is_complete')}")
-
+            return jsonify({
+                'status': 'no_response',
+                'task_id': task_id,
+                'message': 'Agent did not generate a response'
+            }), 200
+            
     except Exception as e:
-        print(f"❌ An error occurred during processing: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        # Always ensure the lock is eventually cleared
-        clear_email_lock(user_email, task_title)
-        print('✅ Processing complete.')
+        logger.error(f"❌ Error processing HTTP message: {e}")
+        return jsonify({'error': str(e)}), 500
 
 def create_or_get_task_record(user_email, task_title, timestamp=None):
     """
@@ -582,7 +617,9 @@ def process_message_http(request: Request):
                     conversation_history += f"Agent: {turn['agentResponse']}\n"
             
             logger.info(f"📝 Built conversation history from {len(task_data.get('conversationHistory', []))} turns")
-            logger.info(f"📝 Conversation history: {conversation_history[:200]}...")
+            logger.info(f"📝 Conversation history length: {len(conversation_history)} characters")
+            if conversation_history:
+                logger.info(f"📝 Last few lines: {conversation_history[-300:]}...")
         else:
             logger.info(f"📝 No existing task found, starting fresh conversation")
         
@@ -603,6 +640,10 @@ def process_message_http(request: Request):
                 'task_id': task_id
             }), 200
         
+        # Log the conversation state being passed to agent
+        logger.info(f"🤖 Passing conversation history to agent:")
+        logger.info(f"📝 History length: {len(conversation_history)} characters")
+        
         # Run the agent with correct parameters
         logger.info(f"🤖 Running agent for task {task_id}")
         logger.info(f"📝 Conversation history length: {len(conversation_history)} characters")
@@ -621,15 +662,18 @@ def process_message_http(request: Request):
             task_id, user_email, task_title, user_message, agent_response, is_complete
         )
         
-        # Update agent state with the new conversation history
+        # Update agent state with the FULL conversation history from the task
         agent_state['currentTask'] = {
-            'conversation_history': agent_result.get('conversation_history', ''),
+            'conversation_history': conversation_history,  # Use the built conversation string
             'is_complete': is_complete,
             'user_email': user_email,
             'taskId': task_id,
             'taskTitle': task_title
         }
         save_task_agent_state_by_key(agent_state_key, agent_state)
+        
+        # Save the updated agent state with full conversation history
+        logger.info(f"💾 Saved agent state with conversation history length: {len(conversation_history)} characters")
         
         logger.info(f"📝 Updated agent state with conversation history length: {len(agent_result.get('conversation_history', ''))} characters")
         logger.info(f"📝 Agent response: {agent_response[:100]}...")
