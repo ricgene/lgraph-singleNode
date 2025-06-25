@@ -245,6 +245,85 @@ This project is for educational and demonstration purposes.
 **Last Updated**: June 2025  
 **Status**: ✅ Production Ready - Fully deployed on Google Cloud Functions
 
+## ⚡ Timing & Performance Options
+
+### Current Polling Configuration
+The system currently uses **Cloud Scheduler** to poll Gmail every 2 minutes for new emails.
+
+### Adjusting Polling Frequency
+
+#### Quick Polling (for testing)
+```bash
+# Poll every 30 seconds
+gcloud scheduler jobs update email-watcher-job \
+  --schedule="*/30 * * * *" \
+  --location=us-central1
+
+# Poll every minute
+gcloud scheduler jobs update email-watcher-job \
+  --schedule="* * * * *" \
+  --location=us-central1
+
+# Reset to 2 minutes (default)
+gcloud scheduler jobs update email-watcher-job \
+  --schedule="*/2 * * * *" \
+  --location=us-central1
+```
+
+#### Check Current Schedule
+```bash
+gcloud scheduler jobs describe email-watcher-job --location=us-central1
+```
+
+### Event-Driven Alternatives (Recommended)
+
+#### Option A: Gmail Push Notifications ⭐
+**Most efficient approach** - eliminates polling entirely
+- **Gmail sends notifications** when new emails arrive
+- **Instant processing** - no delays
+- **Cost-effective** - no unnecessary API calls
+- **Real-time response** - immediate email processing
+
+**Implementation:**
+```bash
+# Set up Gmail Push Notifications
+gcloud pubsub topics create gmail-notifications
+gcloud pubsub subscriptions create email-watcher-sub \
+  --topic=gmail-notifications \
+  --push-endpoint=https://us-central1-prizmpoc.cloudfunctions.net/email-watcher
+```
+
+#### Option B: Gmail API Webhooks
+**Direct Gmail API integration**
+- **Webhook-based** email processing
+- **No scheduler needed**
+- **Custom filtering** capabilities
+- **Real-time processing**
+
+#### Option C: Gmail Add-on/Extension
+**Browser-based monitoring**
+- **Chrome extension** for Gmail
+- **Immediate processing**
+- **User-initiated** responses
+- **No server polling**
+
+### Performance Comparison
+
+| Method | Response Time | Cost | Complexity | Reliability |
+|--------|---------------|------|------------|-------------|
+| **Current (2-min polling)** | 0-2 minutes | Medium | Low | High |
+| **30-second polling** | 0-30 seconds | High | Low | High |
+| **Gmail Push Notifications** | Instant | Low | Medium | High |
+| **Gmail API Webhooks** | Instant | Low | High | Medium |
+| **Browser Extension** | Instant | Very Low | High | Medium |
+
+### Recommended Migration Path
+1. **Start with 30-second polling** for immediate improvement
+2. **Implement Gmail Push Notifications** for production
+3. **Consider Gmail API Webhooks** for advanced filtering
+
+---
+
 ### Tech Debt / To Be Done
 
 **Cloud Functions to Delete (Legacy, Duplicates, or Deprecated):**

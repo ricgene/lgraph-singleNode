@@ -1,69 +1,74 @@
 graph TB
+    %% User & Mobile App
+    USER[User]
+    PRIZM_APP[Prizm Mobile App<br/>make-https-email]
+    
     %% External Services
     GMAIL[Gmail IMAP/SMTP]
     FIREBASE[(Firebase Firestore)]
     PUBSUB[Google Cloud Pub/Sub]
     
     %% Cloud Functions (Deployed)
-    WATCHER_FUNC[email_watcher_function/index.js<br/>email-watcher Cloud Function<br/>(Node.js, HTTP Trigger)]
-    PROCESS_FUNC[cloud_function/main.py<br/>process-incoming-email Cloud Function<br/>(Python, Pub/Sub Trigger)]
-    EMAIL_FUNC[simple_email_function/main.py<br/>send-email-simple Cloud Function<br/>(Python, HTTP Trigger)]
+    TASK_CREATE_FUNC[Task Creation Function<br/>Creates Task in Firestore & LangGraph<br/>GCP Function, HTTP Trigger]
+    WATCHER_FUNC[email_watcher_function/index.js<br/>email-watcher Cloud Function<br/>Node.js, HTTP Trigger]
+    PROCESS_FUNC[cloud_function/main.py<br/>process-incoming-email Cloud Function<br/>Python, Pub/Sub Trigger]
+    EMAIL_FUNC[simple_email_function/main.py<br/>send-email-simple Cloud Function<br/>Python, HTTP Trigger]
     
     %% Cloud Scheduler
-    SCHEDULER[Cloud Scheduler<br/>email-watcher-job<br/>(Every 2 minutes)]
+    SCHEDULER[Cloud Scheduler<br/>email-watcher-job<br/>Every 2 minutes]
     
     %% Agent Logic
-    AGENT_LOGIC[cloud_function/agent.py<br/>Agent Logic & State Management]
-    
-    %% Local Development Files (Not Deployed)
-    LOCAL_WATCHER[email_watcher_minimal.js<br/>Local Development Version]
-    LANGGRAPH_SERVER[langgraph_server.py<br/>Local LangGraph Server]
+    AGENT_LOGIC[cloud_function/agent.py<br/>LangGraph Agent Logic & State Management]
     
     %% Configuration & Environment
-    ENV[.env<br/>Environment Variables]
     DEPLOY_CMDS[gcloudFunctionsDeployProcess-incoming.txt<br/>Deployment Commands]
     
     %% Data Flow Connections
     
-    %% Cloud Scheduler Flow
+    %% Initial Task Creation Flow
+    USER -->|Creates Task| PRIZM_APP
+    PRIZM_APP -->|HTTP POST| TASK_CREATE_FUNC
+    TASK_CREATE_FUNC -->|Create Task Record| FIREBASE
+    TASK_CREATE_FUNC -->|Initialize Conversation| AGENT_LOGIC
+    
+    %% LangGraph Conversation Loop
+    AGENT_LOGIC -->|Send Email| EMAIL_FUNC
+    EMAIL_FUNC -->|SMTP| GMAIL
+    GMAIL -->|User Response| USER
+    
+    %% Email Processing Loop
     SCHEDULER -->|HTTP POST| WATCHER_FUNC
     WATCHER_FUNC -->|IMAP Polling| GMAIL
     WATCHER_FUNC -->|Publish Message| PUBSUB
-    
-    %% Pub/Sub Processing Flow
     PUBSUB -->|Trigger| PROCESS_FUNC
     PROCESS_FUNC -->|Import & Call| AGENT_LOGIC
-    PROCESS_FUNC -->|HTTP POST| EMAIL_FUNC
-    EMAIL_FUNC -->|SMTP| GMAIL
     
     %% State Management
     PROCESS_FUNC -->|Read/Write| FIREBASE
     AGENT_LOGIC -->|Read/Write| FIREBASE
-    
-    %% Local Development (Alternative)
-    LOCAL_WATCHER -->|IMAP Polling| GMAIL
-    LOCAL_WATCHER -->|Publish Message| PUBSUB
-    LANGGRAPH_SERVER -->|HTTP POST| AGENT_LOGIC
-    
-    %% Environment & Configuration
-    ENV --> WATCHER_FUNC
-    ENV --> PROCESS_FUNC
-    ENV --> EMAIL_FUNC
-    ENV --> LOCAL_WATCHER
+    TASK_CREATE_FUNC -->|Read/Write| FIREBASE
     
     %% Styling
     classDef deployed fill:#e8f5e8
     classDef external fill:#e1f5fe
-    classDef local fill:#fff3e0
     classDef config fill:#fce4ec
+    classDef user fill:#fff8e1
+    classDef mobile fill:#e8f5e8
     
-    class WATCHER_FUNC,PROCESS_FUNC,EMAIL_FUNC,SCHEDULER deployed
+    class WATCHER_FUNC,PROCESS_FUNC,EMAIL_FUNC,SCHEDULER,TASK_CREATE_FUNC deployed
     class GMAIL,FIREBASE,PUBSUB external
-    class LOCAL_WATCHER,LANGGRAPH_SERVER local
-    class ENV,DEPLOY_CMDS config
+    class DEPLOY_CMDS config
+    class USER user
+    class PRIZM_APP mobile
     
     %% Subgraphs for better organization
+    subgraph "User Interface"
+        USER
+        PRIZM_APP
+    end
+    
     subgraph "Deployed Cloud Functions"
+        TASK_CREATE_FUNC
         WATCHER_FUNC
         PROCESS_FUNC
         EMAIL_FUNC
@@ -75,11 +80,10 @@ graph TB
         FIREBASE
     end
     
-    subgraph "Local Development"
-        LOCAL_WATCHER
-        LANGGRAPH_SERVER
-    end
-    
     subgraph "External Services"
         GMAIL
+    end
+    
+    subgraph "Core Logic"
+        AGENT_LOGIC
     end 

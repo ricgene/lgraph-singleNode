@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture Diagram - Mermaid Render</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .mermaid {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .file-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #007bff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Email Processing System Architecture</h1>
+        
+        <div class="file-info">
+            <strong>Source:</strong> docs/architecture_detailed.mmd<br>
+            <strong>Description:</strong> Detailed architecture diagram showing the email processing system with deployed cloud functions, external services, and local development components.
+        </div>
+
+        <div class="mermaid">
+graph TB
+    %% External Services
+    GMAIL[Gmail IMAP/SMTP]
+    FIREBASE[(Firebase Firestore)]
+    PUBSUB[Google Cloud Pub/Sub]
+    
+    %% Cloud Functions (Deployed)
+    WATCHER_FUNC[email_watcher_function/index.js<br/>email-watcher Cloud Function<br/>(Node.js, HTTP Trigger)]
+    PROCESS_FUNC[cloud_function/main.py<br/>process-incoming-email Cloud Function<br/>(Python, Pub/Sub Trigger)]
+    EMAIL_FUNC[simple_email_function/main.py<br/>send-email-simple Cloud Function<br/>(Python, HTTP Trigger)]
+    
+    %% Cloud Scheduler
+    SCHEDULER[Cloud Scheduler<br/>email-watcher-job<br/>(Every 2 minutes)]
+    
+    %% Agent Logic
+    AGENT_LOGIC[cloud_function/agent.py<br/>Agent Logic & State Management]
+    
+    %% Local Development Files (Not Deployed)
+    LOCAL_WATCHER[email_watcher_minimal.js<br/>Local Development Version]
+    LANGGRAPH_SERVER[langgraph_server.py<br/>Local LangGraph Server]
+    
+    %% Configuration & Environment
+    ENV[.env<br/>Environment Variables]
+    DEPLOY_CMDS[gcloudFunctionsDeployProcess-incoming.txt<br/>Deployment Commands]
+    
+    %% Data Flow Connections
+    
+    %% Cloud Scheduler Flow
+    SCHEDULER -->|HTTP POST| WATCHER_FUNC
+    WATCHER_FUNC -->|IMAP Polling| GMAIL
+    WATCHER_FUNC -->|Publish Message| PUBSUB
+    
+    %% Pub/Sub Processing Flow
+    PUBSUB -->|Trigger| PROCESS_FUNC
+    PROCESS_FUNC -->|Import & Call| AGENT_LOGIC
+    PROCESS_FUNC -->|HTTP POST| EMAIL_FUNC
+    EMAIL_FUNC -->|SMTP| GMAIL
+    
+    %% State Management
+    PROCESS_FUNC -->|Read/Write| FIREBASE
+    AGENT_LOGIC -->|Read/Write| FIREBASE
+    
+    %% Local Development (Alternative)
+    LOCAL_WATCHER -->|IMAP Polling| GMAIL
+    LOCAL_WATCHER -->|Publish Message| PUBSUB
+    LANGGRAPH_SERVER -->|HTTP POST| AGENT_LOGIC
+    
+    %% Environment & Configuration
+    ENV --> WATCHER_FUNC
+    ENV --> PROCESS_FUNC
+    ENV --> EMAIL_FUNC
+    ENV --> LOCAL_WATCHER
+    
+    %% Styling
+    classDef deployed fill:#e8f5e8
+    classDef external fill:#e1f5fe
+    classDef local fill:#fff3e0
+    classDef config fill:#fce4ec
+    
+    class WATCHER_FUNC,PROCESS_FUNC,EMAIL_FUNC,SCHEDULER deployed
+    class GMAIL,FIREBASE,PUBSUB external
+    class LOCAL_WATCHER,LANGGRAPH_SERVER local
+    class ENV,DEPLOY_CMDS config
+    
+    %% Subgraphs for better organization
+    subgraph "Deployed Cloud Functions"
+        WATCHER_FUNC
+        PROCESS_FUNC
+        EMAIL_FUNC
+    end
+    
+    subgraph "Cloud Services"
+        SCHEDULER
+        PUBSUB
+        FIREBASE
+    end
+    
+    subgraph "Local Development"
+        LOCAL_WATCHER
+        LANGGRAPH_SERVER
+    end
+    
+    subgraph "External Services"
+        GMAIL
+    end
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true
+            }
+        });
+    </script>
+</body>
+</html> 
