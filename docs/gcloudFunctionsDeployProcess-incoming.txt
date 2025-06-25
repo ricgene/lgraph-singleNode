@@ -12,7 +12,7 @@ Not sure for things below this line - function send-mail-simple is used:
 
 -------------------
 
-gcloud functions deploy process-incoming-email --gen2 --runtime=python311 --region=us-central1 --source=cloud_function --entry-point=process_email_pubsub --trigger-topic=incoming-messages --memory=512MB --timeout=540s --set-env-vars EMAIL_FUNCTION_URL=https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple,OPENAI_API_KEY=sk-proj-_...
+gcloud functions deploy process-incoming-email --gen2 --runtime=python311 --region=us-central1 --source=cloud_function --entry-point=process_email_pubsub --trigger-topic=incoming-messages --memory=512MB --timeout=540s --set-env-vars EMAIL_FUNCTION_URL=https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple,LANGGRAPH_SERVER_URL=https://prizm2-9d0348d2abe5594d8b533da6f9b05cac.us.langgraph.app,OPENAI_API_KEY=sk-proj-_...
 
 curl -X POST https://us-central1-prizmpoc.cloudfunctions.net/sendEmail -H "Content-Type: application/json" -d '{"to": "richard.genet@gmail.com", "subject": "Debug Test", "body": "Testing what address this actually sends to."}'
 

@@ -1,838 +1,423 @@
-import base64
-import json
+"""
+Cloud Function for processing incoming emails with Firebase Authentication and LangGraph integration.
+"""
 import os
-import time
-import random
-from google.cloud import firestore
-import requests
-from email.mime.text import MIMEText
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+import json
 import logging
-from datetime import datetime
 import functions_framework
-from flask import Request, jsonify
+from flask import Request
+from typing import Dict, Any
+import google.cloud.logging
+from dotenv import load_dotenv
+import firebase_admin
+from firebase_admin import credentials, auth, firestore
+from langgraph_sdk import get_sync_client
+import requests
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Load environment variables
+load_dotenv()
+
+# Set up Cloud Logging
+try:
+    client = google.cloud.logging.Client()
+    client.setup_logging()
+except Exception:
+    logging.basicConfig(level=logging.INFO)
+
 logger = logging.getLogger(__name__)
 
-# Import the agent logic
-from agent import run_agent_turn
+# Initialize Firebase Admin SDK
+if not firebase_admin._apps:
+    cred = credentials.ApplicationDefault()
+    firebase_admin.initialize_app(cred)
 
-# TODO: Import your LangGraph agent here
-# from your_langgraph_module import run_langgraph_agent
+db = firestore.client()
 
-# Firestore client
-firestore_client = firestore.Client()
+# Helper function to create task-specific keys
+def create_task_key(user_email, task_title, timestamp=None):
+    if not timestamp:
+        from datetime import datetime
+        timestamp = datetime.now().isoformat()
+    return f"taskAgent1_{user_email}_{task_title}_{timestamp}"
 
-# Distributed lock logic
+# Helper function to create task ID
+def create_task_id(user_email, task_title, timestamp=None):
+    if not timestamp:
+        from datetime import datetime
+        timestamp = datetime.now().isoformat()
+    return f"{user_email}_{task_title}_{timestamp}"
+
+# Helper function to find existing task
+def find_existing_task(user_email, task_title):
+    try:
+        task_agent_ref = db.collection('taskAgent1')
+        docs = task_agent_ref.stream()
+        
+        for doc in docs:
+            data = doc.to_dict()
+            if (data.get('currentTask') and 
+                data['currentTask'].get('userEmail') == user_email and 
+                data['currentTask'].get('taskTitle') == task_title and
+                data['currentTask'].get('status') != 'completed'):
+                return {
+                    'taskKey': doc.id,
+                    'taskData': data['currentTask']
+                }
+        
+        return None
+    except Exception as error:
+        logger.error(f'Error finding existing task: {error}')
+        return None
+
+# Helper function to create new task
+def create_new_task(user_email, task_title):
+    from datetime import datetime
+    timestamp = datetime.now().isoformat()
+    task_key = create_task_key(user_email, task_title, timestamp)
+    task_id = create_task_id(user_email, task_title, timestamp)
+    
+    task_agent_state = {
+        'agentStateKey': task_key,
+        'currentTask': {
+            'taskId': task_id,
+            'taskTitle': task_title,
+            'userEmail': user_email,
+            'createdAt': timestamp,
+            'lastUpdated': timestamp,
+            'status': 'active',
+            'emailLock': None,
+            'lastMsgSent': None,
+            'conversationHistory': []
+        },
+        'createdAt': timestamp,
+        'lastUpdated': timestamp
+    }
+    
+    db.collection('taskAgent1').document(task_key).set(task_agent_state)
+    logger.info(f'✅ Created new task: {task_id} with key: {task_key}')
+    
+    return {
+        'taskKey': task_key,
+        'taskData': task_agent_state['currentTask']
+    }
+
+# Distributed locking functions
 def acquire_email_lock(customer_email, task_title):
-    doc_ref = firestore_client.collection('taskAgent1').document(customer_email)
-    try:
+    # First, try to find existing task
+    existing_task = find_existing_task(customer_email, task_title)
+    task_key = None
+    task_agent_state = None
+    
+    if existing_task:
+        # Use existing task
+        task_key = existing_task['taskKey']
+        doc_ref = db.collection('taskAgent1').document(task_key)
         doc = doc_ref.get()
-        data = doc.to_dict() if doc.exists else {"tasks": {}}
-    except Exception as e:
-        print(f"Error getting document: {e}")
-        data = {"tasks": {}}
-
-    task = data.get("tasks", {}).get(task_title, {})
-    if "emailLock" not in task:
-        task["emailLock"] = None
-
-    # Wait random 0-1s
-    wait_time = random.uniform(0, 1)
-    print(f"⏳ Waiting {int(wait_time*1000)}ms before attempting lock acquisition")
-    time.sleep(wait_time)
-
-    # Re-fetch the document to get the latest state after waiting
-    try:
-        doc = doc_ref.get()
-        data = doc.to_dict() if doc.exists else {"tasks": {}}
-        task = data.get("tasks", {}).get(task_title, {})
-    except Exception as e:
-        print(f"Error re-fetching document: {e}")
-        return None
-
-    last4 = str(int(time.time() * 1000))[-4:]
-    print(f"🔒 Attempting to acquire lock with digits: {last4}")
-
-    if task.get("emailLock") is not None:
-        print(f"🚫 Lock already taken: {task['emailLock']}")
-        return None
-
-    # Initialize task if it doesn't exist
-    if not data.get("tasks", {}).get(task_title):
-        data.setdefault("tasks", {})[task_title] = {
-            "taskStartConvo": [],
-            "emailLock": None,
-            "status": "active",
-            "lastMsgSent": None,
-            "taskInfo": {
-                "title": task_title,
-                "description": "Task initiated via email",
-                "priority": "medium",
-                "assignedAgent": "taskAgent1"
-            }
-        }
-    
-    data["tasks"][task_title]["emailLock"] = last4
-    doc_ref.set(data)
-    
-    # Verify
-    time.sleep(0.1) # Give a moment for write to propagate
-    doc = doc_ref.get()
-    verify = doc.to_dict().get("tasks", {}).get(task_title, {}).get("emailLock")
-    if verify == last4:
-        print(f"✅ Lock acquired: {last4}")
-        return last4
-        
-    print(f"❌ Lock verification failed. Expected: {last4}, Got: {verify}")
-    return None
-
-def clear_email_lock(customer_email, task_title):
-    doc_ref = firestore_client.collection('taskAgent1').document(customer_email)
-    try:
-        doc = doc_ref.get()
-        if not doc.exists:
-            return
-        data = doc.to_dict()
-        if task_title in data.get("tasks", {}):
-            data["tasks"][task_title]["emailLock"] = None
-            doc_ref.set(data)
-            print(f"🔓 Cleared email lock for {customer_email} - {task_title}")
-    except Exception as e:
-        print(f"Error clearing lock: {e}")
-
-# Firestore data handling functions
-def load_task_agent_state(customer_email):
-    try:
-        doc_ref = firestore_client.collection('taskAgent1').document(customer_email)
-        doc = doc_ref.get()
-        if doc.exists:
-            return doc.to_dict()
-        return {"customerEmail": customer_email, "tasks": {}}
-    except Exception as e:
-        print(f"Error loading task agent state: {e}")
-        return {"customerEmail": customer_email, "tasks": {}}
-
-def save_task_agent_state(customer_email, state):
-    try:
-        doc_ref = firestore_client.collection('taskAgent1').document(customer_email)
-        doc_ref.set(state)
-    except Exception as e:
-        print(f"Error saving task agent state: {e}")
-
-def add_conversation_turn(customer_email, task_title, user_message, agent_response, is_complete=False):
-    state = load_task_agent_state(customer_email)
-    task = state.setdefault("tasks", {}).setdefault(task_title, {
-        "taskStartConvo": [],
-        "emailLock": None,
-        "status": "active",
-        "lastMsgSent": None,
-        "taskInfo": {
-            "title": task_title,
-            "description": "Task initiated via email",
-            "priority": "medium",
-            "assignedAgent": "taskAgent1"
-        }
-    })
-    
-    turn_number = len(task["taskStartConvo"]) + 1
-    turn = {
-        "userMessage": user_message,
-        "agentResponse": agent_response,
-        "turnNumber": turn_number,
-        "isComplete": is_complete,
-        "conversationId": f"{customer_email}-{task_title}-{int(time.time() * 1000)}"
-    }
-    
-    task["taskStartConvo"].append(turn)
-    if is_complete:
-        task["status"] = "completed"
-        
-    save_task_agent_state(customer_email, state)
-    return turn
-
-def should_send_response(customer_email, task_title, question_number):
-    # For the new static subject line approach, always send responses
-    # unless the conversation is complete
-    state = load_task_agent_state(customer_email)
-    task = state.get("tasks", {}).get(task_title)
-    
-    if not task:
-        return True
-        
-    # Check if the last turn was marked as complete
-    conversation_turns = task.get("taskStartConvo", [])
-    if conversation_turns and conversation_turns[-1].get("isComplete"):
-        print(f"🚫 Conversation is complete for {customer_email} - {task_title}")
-        return False
-        
-    return True
-
-def update_last_msg_sent(customer_email, task_title, subject, body):
-    state = load_task_agent_state(customer_email)
-    task = state.get("tasks", {}).get(task_title)
-    if not task:
-        return False
-
-    import hashlib
-    message_hash = hashlib.md5(f"{subject}{body}".encode()).hexdigest()
-
-    if task.get("lastMsgSent") and task["lastMsgSent"].get("messageHash") == message_hash:
-        print(f"🚫 Duplicate message detected for {customer_email} - {task_title}")
-        return False
-        
-    task["lastMsgSent"] = {
-        "subject": subject,
-        "body": body,
-        "messageHash": message_hash,
-        "turnNumber": len(task["taskStartConvo"])
-    }
-    
-    save_task_agent_state(customer_email, state)
-    print(f"✅ Updated lastMsgSent for {customer_email} - {task_title}")
-    return True
-
-def send_email_via_gcp(recipient_email: str, subject: str, body: str) -> bool:
-    """Sends an email by calling the deployed GCP email function."""
-    email_function_url = os.getenv('EMAIL_FUNCTION_URL', 'https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple')
-    if not email_function_url:
-        logger.error("❌ EMAIL_FUNCTION_URL not found in environment variables.")
-        return False
-    try:
-        payload = {"to": recipient_email, "subject": subject, "body": body}
-        logger.info(f"📧 Sending email to {recipient_email} with subject: {subject}")
-        response = requests.post(email_function_url, json=payload, timeout=30)
-        if response.status_code == 200:
-            logger.info(f"✅ Email sent successfully to {recipient_email}")
-            return True
-        else:
-            logger.error(f"❌ Email function returned status {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        logger.error(f"❌ Error calling email function: {e}")
-        return False
-
-# Main entry point for Pub/Sub-triggered Cloud Function
-def process_email_pubsub(event, context):
-    print('📧 Cloud Function triggered via Pub/Sub')
-    if 'data' not in event:
-        print('No data in event')
-        return
-
-    try:
-        # Pub/Sub automatically base64 encodes the message data
-        payload = base64.b64decode(event['data']).decode('utf-8')
-        print(f'📧 Raw payload: {payload}')
-        message = json.loads(payload)
-        print(f'📧 Parsed message: {message}')
-    except Exception as e:
-        print(f'Error decoding Pub/Sub message: {e}')
-        print(f'Event data: {event.get("data", "No data")}')
-        return
-
-    user_email = message.get('userEmail')
-    user_response = message.get('userResponse')
-    task_title = message.get('taskTitle', 'Prizm Task Question')
-
-    if not user_email or not user_response:
-        print('Missing required fields: userEmail, userResponse')
-        print(f'Received message: {message}')
-        return
-
-    print(f'Processing email reply: {user_email} | Task: {task_title}')
-    
-    # Find the most recent active task for this user
-    tasks_ref = firestore_client.collection('tasks')
-    existing_tasks = tasks_ref.where('userEmail', '==', user_email)\
-                              .where('status', '==', 'active')\
-                              .order_by('lastUpdated', direction=firestore.Query.DESCENDING)\
-                              .limit(1)\
-                              .stream()
-    
-    existing_task = None
-    for task in existing_tasks:
-        existing_task = task.to_dict()
-        break
-    
-    if not existing_task:
-        print(f'❌ No active task found for {user_email}')
-        return
-    
-    task_id = existing_task['taskId']
-    agent_state_key = existing_task['agentStateKey']
-    print(f'📋 Found existing task for email reply: {task_id}')
-    
-    # Load current agent state
-    agent_state = load_task_agent_state_by_key(agent_state_key)
-    
-    # Build conversation history from task's conversation history
-    task_ref = firestore_client.collection('tasks').document(task_id)
-    task_doc = task_ref.get()
-    conversation_history = ""
-    
-    if task_doc.exists:
-        task_data = task_doc.to_dict()
-        # Build conversation history from previous turns
-        for turn in task_data.get('conversationHistory', []):
-            if turn.get('userMessage'):
-                conversation_history += f"User: {turn['userMessage']}\n"
-            if turn.get('agentResponse'):
-                conversation_history += f"Agent: {turn['agentResponse']}\n"
-        
-        print(f"📝 Built conversation history from {len(task_data.get('conversationHistory', []))} turns")
-        print(f"📝 Conversation history length: {len(conversation_history)} characters")
+        task_agent_state = doc.to_dict()
+        logger.info(f'📋 Found existing task: {existing_task["taskData"]["taskId"]}')
     else:
-        print(f"📝 No existing task found, starting fresh conversation")
+        # Create new task
+        new_task = create_new_task(customer_email, task_title)
+        task_key = new_task['taskKey']
+        doc_ref = db.collection('taskAgent1').document(task_key)
+        doc = doc_ref.get()
+        task_agent_state = doc.to_dict()
+        logger.info(f'🆕 Created new task: {new_task["taskData"]["taskId"]}')
     
-    # Add the current user message to the conversation history
-    conversation_history += f"User: {user_response}\n"
-    print(f"📝 Added current user message to conversation history")
-    print(f"📝 Final conversation history length: {len(conversation_history)} characters")
+    # Ensure emailLock field exists for existing tasks
+    if 'emailLock' not in task_agent_state['currentTask']:
+        task_agent_state['currentTask']['emailLock'] = None
     
-    # Create proper previous state for the agent
-    previous_state = {
-        'conversation_history': conversation_history,
-        'is_complete': agent_state.get('currentTask', {}).get('is_complete', False),
-        'user_email': user_email
-    }
+    # Wait random amount of time (0-1 second)
+    import random
+    import time
+    wait_time = random.random() * 1000
+    logger.info(f'⏳ Waiting {wait_time:.0f}ms before attempting lock acquisition')
+    time.sleep(wait_time / 1000)
     
-    print(f"📝 Previous state conversation history length: {len(previous_state['conversation_history'])} characters")
+    # Get last 4 digits of high-resolution timestamp
+    lock_timestamp = int(time.time() * 1000)
+    last_4_digits = str(lock_timestamp)[-4:]
+    logger.info(f'🔒 Attempting to acquire lock with digits: {last_4_digits} (timestamp: {lock_timestamp})')
     
-    # Check if we should send a response
-    if not should_send_response_by_task(task_id):
-        print(f"🚫 No response needed for task {task_id}")
-        return
+    # Check if lock is already held
+    if (task_agent_state['currentTask']['emailLock'] and 
+        (time.time() * 1000 - task_agent_state['currentTask']['emailLock']['timestamp']) < 30000):
+        logger.info(f'🚫 Email lock already held for {customer_email} - {task_title}')
+        return False
     
-    # Run the agent with correct parameters
-    print(f"🤖 Running agent for task {task_id}")
-    print(f"📝 Conversation history length: {len(conversation_history)} characters")
-    agent_result = run_agent_turn(
-        user_input=user_response,
-        previous_state=previous_state,
-        user_email=user_email
-    )
-    
-    # Extract the agent's question from the result
-    agent_response = agent_result.get('question', 'I apologize, but I encountered an issue processing your message.')
-    is_complete = agent_result.get('is_complete', False)
-    
-    # Add conversation turn
-    turn = add_conversation_turn_with_task(
-        task_id, user_email, task_title, user_response, agent_response, is_complete
-    )
-    
-    # Update agent state with the FULL conversation history from the task
-    agent_state['currentTask'] = {
-        'conversation_history': conversation_history,  # Use the built conversation string
-        'is_complete': is_complete,
-        'user_email': user_email,
-        'taskId': task_id,
+    # Acquire lock
+    from datetime import datetime
+    task_agent_state['currentTask']['emailLock'] = {
+        'timestamp': datetime.now().isoformat(),
+        'lockId': last_4_digits,
         'taskTitle': task_title
     }
-    save_task_agent_state_by_key(agent_state_key, agent_state)
+    task_agent_state['currentTask']['lastUpdated'] = datetime.now().isoformat()
     
-    print(f"💾 Saved agent state with conversation history length: {len(conversation_history)} characters")
-    print(f"📝 Agent response: {agent_response[:100]}...")
-    
-    # Send email if response is generated and conversation is not complete
-    if agent_response and agent_response.strip() and not is_complete:
-        subject = f"Prizm Task Question"
-        email_body = f"""Hello!
+    db.collection('taskAgent1').document(task_key).set(task_agent_state)
+    logger.info(f'🔒 Successfully acquired email lock for {customer_email} - {task_title} (lock: {last_4_digits})')
+    return last_4_digits
 
-Helen from Prizm here. I have a question about your task:
-
-{agent_response}
-
-Please reply to this email."""
-        
-        print(f"📧 Preparing to send email to {user_email}")
-        print(f"📧 Subject: {subject}")
-        print(f"📧 Body preview: {email_body[:100]}...")
-        
-        # Check if we should send this email (avoid duplicates)
-        if update_last_msg_sent_by_task(task_id, subject, email_body):
-            print(f"📧 Sending email - no duplicate detected")
-            email_sent = send_email_via_gcp(user_email, subject, email_body)
-            if email_sent:
-                print(f"📧 Email sent successfully to {user_email} for task {task_id}")
-            else:
-                print(f"❌ Failed to send email to {user_email} for task {task_id}")
-        else:
-            print(f"🚫 Skipping duplicate email for task {task_id}")
-    elif is_complete:
-        # Send completion email
-        subject = f"Prizm Task Complete"
-        email_body = f"""Hello!
-
-Helen from Prizm here. Thank you for providing all the information about your task!
-
-{agent_response}
-
-We have everything we need to help you with your project. Our team will be in touch soon with next steps.
-
-Best regards,
-Helen from Prizm"""
-        
-        print(f"📧 Sending completion email to {user_email}")
-        email_sent = send_email_via_gcp(user_email, subject, email_body)
-        if email_sent:
-            print(f"📧 Completion email sent successfully to {user_email}")
-        else:
-            print(f"❌ Failed to send completion email to {user_email}")
-    else:
-        print(f"🚫 No response to send for task {task_id}")
-    
-    print(f"✅ Processed email reply for task {task_id}")
-    print(f"📊 Turn number: {turn['turnNumber'] if turn else 'unknown'}")
-    print(f"📊 Is complete: {is_complete}")
-
-def create_or_get_task_record(user_email, task_title, timestamp=None):
-    """
-    Create a new task record or get existing one with the key structure: userEmail,taskTitle,timestamp
-    """
-    # Use provided timestamp or generate new one
-    if timestamp is None:
-        timestamp = datetime.now().isoformat()
-    
-    task_id = f"{user_email}_{task_title}_{timestamp}"
-    agent_state_key = f"taskAgent1_{user_email}_{task_title}_{timestamp}"
-    
-    # Check if task already exists
-    task_ref = firestore_client.collection('tasks').document(task_id)
-    existing_task = task_ref.get()
-    
-    if existing_task.exists:
-        logger.info(f"📋 Found existing task: {task_id}")
-        return task_id, agent_state_key
-    
-    # Create new task record
-    task_data = {
-        "taskId": task_id,
-        "userEmail": user_email,
-        "taskTitle": task_title,
-        "taskDescription": f"Task initiated via email conversation",
-        "taskType": "home_improvement",
-        "createdAt": timestamp,
-        "status": "active",
-        "agentStateKey": agent_state_key,
-        "metadata": {
-            "version": "1.0",
-            "createdBy": "email_system",
-            "lastUpdated": timestamp
-        }
-    }
-    
-    # Add to tasks collection
-    task_ref.set(task_data)
-    
-    logger.info(f"✅ Created new task record: {task_id}")
-    return task_id, agent_state_key
-
-def load_task_agent_state_by_key(agent_state_key):
-    """
-    Load agent state using the new key structure - make it task-specific
-    """
-    try:
-        # Use the full agent_state_key as the document key to make it task-specific
-        doc_ref = firestore_client.collection('taskAgent1').document(agent_state_key)
-        doc = doc_ref.get()
-        
-        if doc.exists:
-            return doc.to_dict()
-        else:
-            # Initialize new state
-            return {
-                "currentTask": {},
-                "agentStateKey": agent_state_key,
-                "createdAt": datetime.now().isoformat()
-            }
-    except Exception as e:
-        print(f"Error loading task agent state: {e}")
-        return {"currentTask": {}}
-
-def add_conversation_turn_with_task(task_id, user_email, task_title, user_message, agent_response, is_complete=False):
-    """
-    Add conversation turn with task reference
-    """
-    # Get the task document
-    task_ref = firestore_client.collection('tasks').document(task_id)
-    task_doc = task_ref.get()
-    
-    if not task_doc.exists:
-        print(f"❌ Task {task_id} not found")
+def clear_email_lock(customer_email, task_title):
+    # Find existing task
+    existing_task = find_existing_task(customer_email, task_title)
+    if not existing_task:
+        logger.info(f'⚠️ No task found to clear lock for {customer_email} - {task_title}')
         return
     
-    task_data = task_doc.to_dict()
+    doc_ref = db.collection('taskAgent1').document(existing_task['taskKey'])
+    doc = doc_ref.get()
+    task_agent_state = doc.to_dict()
     
-    # Initialize conversation history if it doesn't exist
-    if 'conversationHistory' not in task_data:
-        task_data['conversationHistory'] = []
-    
-    # Calculate turn number based on agent responses (questions) only
-    # Count how many agent responses we've sent so far
-    agent_response_count = sum(1 for turn in task_data['conversationHistory'] if turn.get('agentResponse'))
-    turn_number = agent_response_count + 1
-    
-    turn = {
-        "userMessage": user_message,
-        "agentResponse": agent_response,
-        "turnNumber": turn_number,
-        "isComplete": is_complete,
-        "timestamp": datetime.now().isoformat(),
-        "conversationId": f"{task_id}-{turn_number}"
-    }
-    
-    task_data['conversationHistory'].append(turn)
-    task_data['lastUpdated'] = datetime.now().isoformat()
-    
-    if is_complete:
-        task_data['status'] = 'completed'
-    
-    # Update the task document
-    task_ref.set(task_data)
-    
-    # Also update the agent state
-    agent_state = load_task_agent_state_by_key(task_data['agentStateKey'])
-    agent_state['currentTask'] = {
-        "taskId": task_id,
-        "taskTitle": task_title,
-        "lastTurn": turn,
-        "status": task_data['status']
-    }
-    
-    save_task_agent_state_by_key(task_data['agentStateKey'], agent_state)
-    
-    print(f"✅ Added conversation turn {turn_number} to task {task_id}")
-    return turn
+    if task_agent_state['currentTask']:
+        task_agent_state['currentTask']['emailLock'] = None
+        from datetime import datetime
+        task_agent_state['currentTask']['lastUpdated'] = datetime.now().isoformat()
+        db.collection('taskAgent1').document(existing_task['taskKey']).set(task_agent_state)
+        logger.info(f'🔓 Cleared email lock for {customer_email} - {task_title}')
 
-def save_task_agent_state_by_key(agent_state_key, state):
-    """
-    Save agent state using the new key structure - make it task-specific
-    """
+# LangGraph processing function
+def process_user_response(user_email, user_response, conversation_state):
     try:
-        # Use the full agent_state_key as the document key to make it task-specific
-        doc_ref = firestore_client.collection('taskAgent1').document(agent_state_key)
-        doc_ref.set(state, merge=True)
-    except Exception as e:
-        print(f"Error saving task agent state: {e}")
-
-def should_send_response_by_task(task_id):
-    """
-    Check if we should send a response for this task
-    """
-    task_ref = firestore_client.collection('tasks').document(task_id)
-    task_doc = task_ref.get()
-    
-    if not task_doc.exists:
-        return True
-    
-    task_data = task_doc.to_dict()
-    
-    # Check if the task is completed
-    if task_data.get('status') == 'completed':
-        print(f"🚫 Task {task_id} is completed")
-        return False
-    
-    # Check if the last turn was marked as complete
-    conversation_history = task_data.get('conversationHistory', [])
-    if conversation_history and conversation_history[-1].get('isComplete'):
-        print(f"🚫 Last conversation turn was marked complete for task {task_id}")
-        return False
-    
-    return True
-
-def update_last_msg_sent_by_task(task_id, subject, body):
-    """
-    Update last message sent for a specific task
-    """
-    import hashlib
-    
-    task_ref = firestore_client.collection('tasks').document(task_id)
-    task_doc = task_ref.get()
-    
-    if not task_doc.exists:
-        return True  # Allow sending if task doesn't exist
-    
-    task_data = task_doc.to_dict()
-    message_hash = hashlib.md5(f"{subject}{body}".encode()).hexdigest()
-    
-    if task_data.get('lastMsgSent') and task_data['lastMsgSent'].get('messageHash') == message_hash:
-        print(f"🚫 Duplicate message detected for task {task_id}")
-        return False
-    
-    task_data['lastMsgSent'] = {
-        "subject": subject,
-        "body": body,
-        "messageHash": message_hash,
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    task_ref.set(task_data, merge=True)
-    print(f"✅ Updated lastMsgSent for task {task_id}")
-    return True
-
-# Entry point for Google Cloud Functions
-# In your deployment, set entry_point to 'process_email_pubsub' 
-
-# HTTP Webhook endpoint for receiving messages
-@functions_framework.http
-def process_message_http(request: Request):
-    """
-    HTTP webhook endpoint for receiving messages from various sources
-    (SMS, web forms, etc.)
-    """
-    try:
-        # Handle CORS preflight requests
-        if request.method == 'OPTIONS':
-            headers = {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Max-Age': '3600'
+        # Import the langgraph_sdk client
+        from langgraph_sdk import get_sync_client
+        
+        # Get LangGraph deployment URL and API key from environment
+        langgraph_deployment_url = os.getenv("LANGGRAPH_DEPLOYMENT_URL")
+        langgraph_api_key = os.getenv("LANGGRAPH_API_KEY")
+        
+        if not langgraph_deployment_url:
+            logger.error("❌ LANGGRAPH_DEPLOYMENT_URL not found in environment variables")
+            return None
+        
+        if not langgraph_api_key:
+            logger.error("❌ LANGGRAPH_API_KEY not found in environment variables")
+            return None
+        
+        # Initialize the langgraph client using the deployment URL
+        client = get_sync_client(
+            url=langgraph_deployment_url,
+            api_key=langgraph_api_key
+        )
+        
+        # Create input data matching the oneNodeRemMem expected format
+        input_data = {
+            "user_input": user_response,
+            "previous_state": {
+                "conversation_history": conversation_state.get("conversation_history", ""),
+                "is_complete": conversation_state.get("is_complete", False),
+                "user_email": user_email
             }
-            return ('', 204, headers)
+        }
         
-        if request.method != 'POST':
-            return jsonify({'error': 'Method not allowed'}), 405
+        logger.info(f"📡 Calling deployed LangGraph service: {langgraph_deployment_url}")
+        logger.info(f"📤 Sending input data: {json.dumps(input_data, indent=2)}")
         
-        # Parse the request
+        # Stream the graph execution
+        graph_output = []
+        for chunk in client.runs.stream(
+            None,  # Threadless run
+            "moBettah",  # Name of your deployed assistant
+            input=input_data,
+            stream_mode="updates",
+        ):
+            logger.info(f"Receiving new event of type: {chunk.event}...")
+            logger.info(f"Chunk data: {chunk.data}")
+            graph_output.append(chunk.data)
+        
+        logger.info(f"✅ LangGraph processing successful for {user_email}")
+        
+        # Extract the response from the graph output
+        # The oneNodeRemMem returns a specific format with question, conversation_history, etc.
+        if graph_output:
+            # Look for the final response in the graph output
+            final_response = None
+            for chunk in reversed(graph_output):
+                if isinstance(chunk, dict) and "question" in chunk:
+                    final_response = chunk
+                    break
+            
+            if final_response:
+                response_data = {
+                    "question": final_response.get("question", ""),
+                    "conversation_history": final_response.get("conversation_history", ""),
+                    "is_complete": final_response.get("is_complete", False),
+                    "completion_state": final_response.get("completion_state", "OTHER"),
+                    "user_email": final_response.get("user_email", user_email)
+                }
+            else:
+                # Fallback if we can't find the expected response format
+                response_data = {
+                    "question": "Processing completed",
+                    "conversation_history": conversation_state.get("conversation_history", ""),
+                    "is_complete": False,
+                    "completion_state": "OTHER",
+                    "user_email": user_email
+                }
+        else:
+            # No output received
+            response_data = {
+                "question": "No response received from LangGraph",
+                "conversation_history": conversation_state.get("conversation_history", ""),
+                "is_complete": False,
+                "completion_state": "OTHER",
+                "user_email": user_email
+            }
+        
+        logger.info(f"📤 Returning response data: {json.dumps(response_data, indent=2)}")
+        return response_data
+        
+    except Exception as error:
+        logger.error(f"❌ Error processing with LangGraph for {user_email}: {error}")
+        logger.exception("Full traceback:")
+        return None
+
+# Firebase Authentication middleware
+def verify_auth_token(request):
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            raise Exception('No valid authorization header')
+
+        token = auth_header.split('Bearer ')[1]
+        if not token:
+            raise Exception('No token provided')
+
+        # Use Firebase Admin SDK to verify the token
+        decoded_token = auth.verify_id_token(token)
+        
+        # Handle tokens that might not have email (like custom tokens)
+        user_email = decoded_token.get('email')
+        if not user_email:
+            # For custom tokens, we'll use the email from the request body
+            request_json = request.get_json(silent=True)
+            if request_json:
+                user_email = request_json.get('userEmail')
+            else:
+                user_email = "test@prizmpoc.com"  # Default fallback
+        
+        return {'uid': decoded_token.get('uid', 'test-user'), 'email': user_email}
+    except Exception as error:
+        logger.error(f'Authentication error: {error}')
+        raise error
+
+@functions_framework.http
+def process_email(request: Request):
+    """Cloud Function entry point for processing emails with LangGraph."""
+    
+    # Set CORS headers
+    response_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+    
+    # Handle preflight requests
+    if request.method == 'OPTIONS':
+        return ('', 204, response_headers)
+    
+    try:
+        # Verify Firebase authentication
+        auth_user = verify_auth_token(request)
+        if not auth_user:
+            logger.error('❌ Authentication failed: No valid token provided')
+            return (json.dumps({
+                'success': False,
+                'message': 'Authentication required'
+            }), 401, response_headers)
+        
+        # Parse request body
         request_json = request.get_json(silent=True)
         if not request_json:
-            return jsonify({'error': 'No JSON data provided'}), 400
+            return (json.dumps({
+                'success': False,
+                'message': 'No JSON data in request'
+            }), 400, response_headers)
         
-        # Handle both old format and new format
-        if 'custemail' in request_json:
-            # Old format: Customer Name, custemail, Task, description, etc.
-            user_email = request_json.get('custemail')
-            customer_name = request_json.get('Customer Name', 'Unknown')
-            task_title = request_json.get('Task', 'General Task')
-            description = request_json.get('description', '')
-            category = request_json.get('Category', '')
-            full_address = request_json.get('Full Address', '')
-            task_budget = request_json.get('Task Budget', 0)
-            state = request_json.get('State', '')
-            vendors = request_json.get('vendors', '')
-            posted_timestamp = request_json.get('Posted', '')
-            
-            # Check if this is a follow-up message (has a simple message) or new task creation
-            if 'message' in request_json:
-                # This is a follow-up message to an existing task
-                user_message = request_json.get('message')
-                source = 'follow_up'
-            else:
-                # This is a new task creation
-                user_message = f"Task: {task_title}\nDescription: {description}\nCategory: {category}\nAddress: {full_address}\nBudget: ${task_budget}\nState: {state}\nVendor Request: {vendors}"
-                source = 'web_form'
+        user_email = request_json.get('userEmail')
+        user_response = request_json.get('userResponse')
+        task_title = request_json.get('taskTitle', 'Prizm Task Question')
+        
+        if not user_email or not user_response:
+            return (json.dumps({
+                'success': False,
+                'message': 'Missing required fields: userEmail, userResponse'
+            }), 400, response_headers)
+        
+        # Verify that the authenticated user matches the userEmail in the request
+        if auth_user['email'] != user_email:
+            logger.error(f'❌ User email mismatch: authenticated={auth_user["email"]}, request={user_email}')
+            return (json.dumps({
+                'success': False,
+                'message': 'User email mismatch'
+            }), 403, response_headers)
+        
+        logger.info(f'📧 Processing email from: {user_email}')
+        logger.info(f'📝 User response: {user_response}')
+        logger.info(f'📋 Task title: {task_title}')
+        
+        # Try to acquire email lock to prevent duplicate processing
+        lock_acquired = acquire_email_lock(user_email, task_title)
+        if not lock_acquired:
+            logger.info(f'🚫 Failed to acquire lock for {user_email} - {task_title}. Another responder is processing this email.')
+            return (json.dumps({
+                'success': False,
+                'message': 'Email already being processed by another instance'
+            }), 200, response_headers)
+        
+        logger.info(f'✅ Successfully acquired lock ({lock_acquired}) for {user_email} - {task_title}')
+        
+        # Get existing task conversation using task discovery
+        existing_task = find_existing_task(user_email, task_title)
+        task_data = None
+        
+        if existing_task:
+            task_data = existing_task['taskData']
+            logger.info(f'📋 Found existing task: {existing_task["taskData"]["taskId"]}')
         else:
-            # New format: user_email, message, task_title
-            user_email = request_json.get('user_email')
-            user_message = request_json.get('message')
-            task_title = request_json.get('task_title', 'General Task')
-            posted_timestamp = request_json.get('timestamp', '')
-            source = request_json.get('source', 'http_webhook')
+            logger.info(f'🆕 No existing task found, will create new one when needed')
         
-        if not user_email or not user_message:
-            return jsonify({'error': 'Missing required fields: custemail or user_email, and message/description'}), 400
-        
-        logger.info(f"📨 Received {source} message from {user_email}: {user_message[:50]}...")
-        
-        # Handle task creation or retrieval based on message type
-        if source == 'follow_up':
-            # For follow-up messages, we need to find the existing task
-            # For now, we'll use a simple approach: find the most recent active task for this user
-            tasks_ref = firestore_client.collection('tasks')
-            existing_tasks = tasks_ref.where('userEmail', '==', user_email)\
-                                      .where('status', '==', 'active')\
-                                      .order_by('lastUpdated', direction=firestore.Query.DESCENDING)\
-                                      .limit(1)\
-                                      .stream()
-            
-            existing_task = None
-            for task in existing_tasks:
-                existing_task = task.to_dict()
-                break
-            
-            if existing_task:
-                task_id = existing_task['taskId']
-                agent_state_key = existing_task['agentStateKey']
-                logger.info(f"📋 Found existing task for follow-up: {task_id}")
-            else:
-                logger.error(f"❌ No existing task found for follow-up message from {user_email}")
-                return jsonify({'error': 'No existing task found for follow-up message'}), 400
-        else:
-            # Create new task record using the Posted timestamp
-            task_id, agent_state_key = create_or_get_task_record(user_email, task_title, posted_timestamp)
-        
-        # Load current agent state
-        agent_state = load_task_agent_state_by_key(agent_state_key)
-        
-        # Build conversation history from task's conversation history
-        task_ref = firestore_client.collection('tasks').document(task_id)
-        task_doc = task_ref.get()
+        # Create conversation history for LangGraph
         conversation_history = ""
+        if task_data and task_data.get('conversationHistory'):
+            conversation_history = "\n\n".join([
+                f"User: {turn['userMessage']}\nAgent: {turn['agentResponse']}"
+                for turn in task_data['conversationHistory']
+            ])
         
-        if task_doc.exists:
-            task_data = task_doc.to_dict()
-            # Build conversation history from previous turns
-            for turn in task_data.get('conversationHistory', []):
-                if turn.get('userMessage'):
-                    conversation_history += f"User: {turn['userMessage']}\n"
-                if turn.get('agentResponse'):
-                    conversation_history += f"Agent: {turn['agentResponse']}\n"
-            
-            logger.info(f"📝 Built conversation history from {len(task_data.get('conversationHistory', []))} turns")
-            logger.info(f"📝 Conversation history length: {len(conversation_history)} characters")
-            if conversation_history:
-                logger.info(f"📝 Last few lines: {conversation_history[-300:]}...")
-        else:
-            logger.info(f"📝 No existing task found, starting fresh conversation")
-        
-        # Add the current user message to the conversation history
-        conversation_history += f"User: {user_message}\n"
-        logger.info(f"📝 Added current user message to conversation history")
-        logger.info(f"📝 Final conversation history length: {len(conversation_history)} characters")
-        
-        # Create proper previous state for the agent
-        previous_state = {
+        # Create temporary conversation state for LangGraph processing
+        temp_conversation_state = {
             'conversation_history': conversation_history,
-            'is_complete': agent_state.get('currentTask', {}).get('is_complete', False),
+            'is_complete': False,
             'user_email': user_email
         }
         
-        logger.info(f"📝 Previous state conversation history length: {len(previous_state['conversation_history'])} characters")
+        # Process the user's response through LangGraph
+        result = process_user_response(user_email, user_response, temp_conversation_state)
         
-        # Check if we should send a response
-        if not should_send_response_by_task(task_id):
-            return jsonify({
-                'status': 'no_response_needed',
-                'message': 'Conversation is complete or response not needed',
-                'task_id': task_id
-            }), 200
+        if not result:
+            logger.info(f'❌ LangGraph processing failed for {user_email}')
+            clear_email_lock(user_email, task_title)
+            return (json.dumps({
+                'success': False,
+                'message': 'Failed to process with LangGraph'
+            }), 500, response_headers)
         
-        # Log the conversation state being passed to agent
-        logger.info(f"🤖 Passing conversation history to agent:")
-        logger.info(f"📝 History length: {len(conversation_history)} characters")
+        # For now, just return success without email sending
+        # You can add email sending logic here later
+        clear_email_lock(user_email, task_title)
         
-        # Run the agent with correct parameters
-        logger.info(f"🤖 Running agent for task {task_id}")
-        logger.info(f"📝 Conversation history length: {len(conversation_history)} characters")
-        agent_result = run_agent_turn(
-            user_input=user_message,
-            previous_state=previous_state,
-            user_email=user_email
-        )
+        return (json.dumps({
+            'success': True,
+            'message': 'Email processed successfully with LangGraph',
+            'result': result
+        }), 200, response_headers)
         
-        # Extract the agent's question from the result
-        agent_response = agent_result.get('question', 'I apologize, but I encountered an issue processing your message.')
-        is_complete = agent_result.get('is_complete', False)
-        
-        # Add conversation turn
-        turn = add_conversation_turn_with_task(
-            task_id, user_email, task_title, user_message, agent_response, is_complete
-        )
-        
-        # Update agent state with the FULL conversation history from the task
-        agent_state['currentTask'] = {
-            'conversation_history': conversation_history,  # Use the built conversation string
-            'is_complete': is_complete,
-            'user_email': user_email,
-            'taskId': task_id,
-            'taskTitle': task_title
-        }
-        save_task_agent_state_by_key(agent_state_key, agent_state)
-        
-        # Save the updated agent state with full conversation history
-        logger.info(f"💾 Saved agent state with conversation history length: {len(conversation_history)} characters")
-        
-        logger.info(f"📝 Updated agent state with conversation history length: {len(agent_result.get('conversation_history', ''))} characters")
-        logger.info(f"📝 Agent response: {agent_response[:100]}...")
-        
-        # Check if response should be sent
-        if agent_response and agent_response.strip():
-            # Send email if response is generated
-            subject = f"Prizm Task Question"
-            email_body = f"""Hello!
-
-Helen from Prizm here. I have a question about your task:
-
-{agent_response}
-
-Please reply to this email."""
-            
-            logger.info(f"📧 Preparing to send email to {user_email}")
-            logger.info(f"📧 Subject: {subject}")
-            logger.info(f"📧 Body preview: {email_body[:100]}...")
-            
-            # Check if we should send this email (avoid duplicates)
-            if update_last_msg_sent_by_task(task_id, subject, email_body):
-                logger.info(f"📧 Sending email - no duplicate detected")
-                email_sent = send_email_via_gcp(user_email, subject, email_body)
-                if email_sent:
-                    logger.info(f"📧 Email sent successfully to {user_email} for task {task_id}")
-                else:
-                    logger.error(f"❌ Failed to send email to {user_email} for task {task_id}")
-            else:
-                logger.info(f"🚫 Skipping duplicate email for task {task_id}")
-            
-            # For HTTP webhook, we return the response directly
-            # For SMS, you would call your SMS service here
-            response_data = {
-                'status': 'success',
-                'task_id': task_id,
-                'agent_response': agent_response,
-                'turn_number': turn['turnNumber'] if turn else 1,
-                'should_send_response': True,
-                'is_complete': is_complete,
-                'email_sent': email_sent if 'email_sent' in locals() else False
-            }
-            
-            logger.info(f"✅ Processed {source} message for task {task_id}")
-            logger.info(f"📊 Response data: {response_data}")
-            return jsonify(response_data), 200
-        else:
-            return jsonify({
-                'status': 'no_response',
-                'task_id': task_id,
-                'message': 'Agent did not generate a response'
-            }), 200
-            
-    except Exception as e:
-        logger.error(f"❌ Error processing HTTP message: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# For local testing with functions framework
-if __name__ == "__main__":
-    import functions_framework
-    
-    @functions_framework.cloud_event
-    def test_function(cloud_event):
-        # Convert cloud event to Pub/Sub event format
-        event = {
-            'data': cloud_event.data.get('message', {}).get('data', '')
-        }
-        context = None
-        return process_email_pubsub(event, context)
-
-# Cloud Run compatibility - Flask app
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
-
-@app.route('/', methods=['POST'])
-def cloud_run_http_handler():
-    """Cloud Run HTTP handler that wraps the Cloud Function logic"""
-    return process_message_http(request)
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint for Cloud Run"""
-    return jsonify({'status': 'healthy'}), 200
-
-# For Cloud Run deployment
-if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port) 
+    except Exception as error:
+        logger.error(f'❌ Cloud function error: {error}')
+        return (json.dumps({
+            'success': False,
+            'message': 'Internal server error',
+            'error': str(error)
+        }), 500, response_headers) 
