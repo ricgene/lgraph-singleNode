@@ -316,19 +316,26 @@ def process_email_pubsub(event, context):
         clear_email_lock(user_email, task_title)
         print('✅ Processing complete.')
 
-def create_or_get_task_record(user_email, task_title):
+def create_or_get_task_record(user_email, task_title, timestamp=None):
     """
     Create a new task record or get existing one with the key structure: userEmail,taskTitle,timestamp
     """
-    # For now, always create a new task to avoid confusion with existing conversations
-    # In the future, we could add logic to detect if we're continuing the same conversation
-    # by checking the last message timestamp or conversation state
+    # Use provided timestamp or generate new one
+    if timestamp is None:
+        timestamp = datetime.now().isoformat()
     
-    # Create new task record
-    timestamp = datetime.now().isoformat()
     task_id = f"{user_email}_{task_title}_{timestamp}"
     agent_state_key = f"taskAgent1_{user_email}_{task_title}_{timestamp}"
     
+    # Check if task already exists
+    task_ref = firestore_client.collection('tasks').document(task_id)
+    existing_task = task_ref.get()
+    
+    if existing_task.exists:
+        logger.info(f"📋 Found existing task: {task_id}")
+        return task_id, agent_state_key
+    
+    # Create new task record
     task_data = {
         "taskId": task_id,
         "userEmail": user_email,
@@ -346,7 +353,6 @@ def create_or_get_task_record(user_email, task_title):
     }
     
     # Add to tasks collection
-    task_ref = firestore_client.collection('tasks').document(task_id)
     task_ref.set(task_data)
     
     logger.info(f"✅ Created new task record: {task_id}")
@@ -536,6 +542,7 @@ def process_message_http(request: Request):
             task_budget = request_json.get('Task Budget', 0)
             state = request_json.get('State', '')
             vendors = request_json.get('vendors', '')
+            posted_timestamp = request_json.get('Posted', '')
             
             # Combine description and vendors as the user message
             user_message = f"Task: {task_title}\nDescription: {description}\nCategory: {category}\nAddress: {full_address}\nBudget: ${task_budget}\nState: {state}\nVendor Request: {vendors}"
@@ -546,6 +553,7 @@ def process_message_http(request: Request):
             user_email = request_json.get('user_email')
             user_message = request_json.get('message')
             task_title = request_json.get('task_title', 'General Task')
+            posted_timestamp = request_json.get('timestamp', '')
             source = request_json.get('source', 'http_webhook')
         
         if not user_email or not user_message:
@@ -553,8 +561,8 @@ def process_message_http(request: Request):
         
         logger.info(f"📨 Received {source} message from {user_email}: {user_message[:50]}...")
         
-        # Create or get task record
-        task_id, agent_state_key = create_or_get_task_record(user_email, task_title)
+        # Create or get task record using the Posted timestamp
+        task_id, agent_state_key = create_or_get_task_record(user_email, task_title, posted_timestamp)
         
         # Load current agent state
         agent_state = load_task_agent_state_by_key(agent_state_key)
