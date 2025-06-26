@@ -92,101 +92,99 @@ async function processEmail(imap, stream, info) {
   }
 }
 
+// List available folders
+function listFolders(imap) {
+  return new Promise((resolve, reject) => {
+    imap.getBoxes((err, boxes) => {
+      if (err) {
+        console.error('Error listing folders:', err);
+        reject(err);
+        return;
+      }
+      
+      console.log('📁 Available folders:');
+      function printBoxes(boxes, prefix = '') {
+        for (const [name, box] of Object.entries(boxes)) {
+          console.log(`${prefix}${name}: ${box.path}`);
+          if (box.children) {
+            printBoxes(box.children, prefix + '  ');
+          }
+        }
+      }
+      printBoxes(boxes);
+      resolve(boxes);
+    });
+  });
+}
+
 // Main function to check emails
 async function checkEmails() {
   return new Promise((resolve, reject) => {
     const imap = createImapConnection();
 
-    imap.once('ready', () => {
+    imap.once('ready', async () => {
       console.log('IMAP connection ready');
-      
-      // Check both INBOX and Social folders
-      const foldersToCheck = ['INBOX', '[Gmail]/Social'];
-      let completedFolders = 0;
-      
-      foldersToCheck.forEach(folderName => {
-        imap.openBox(folderName, false, (err, box) => {
+      try {
+        // List available folders (optional, for debugging)
+        await listFolders(imap);
+        // Only check INBOX
+        imap.openBox('INBOX', false, (err, box) => {
           if (err) {
-            console.error(`Error opening ${folderName}:`, err);
-            completedFolders++;
-            if (completedFolders === foldersToCheck.length) {
-              imap.end();
-              resolve();
-            }
+            console.error('Error opening INBOX:', err);
+            imap.end();
+            resolve();
             return;
           }
-
-          console.log(`Checking folder: ${folderName}`);
-
-          // Search for unread emails
+          console.log('Checking folder: INBOX');
           imap.search(['UNSEEN'], (err, results) => {
             if (err) {
-              console.error(`Search error in ${folderName}:`, err);
-              completedFolders++;
-              if (completedFolders === foldersToCheck.length) {
-                imap.end();
-                resolve();
-              }
+              console.error('Search error in INBOX:', err);
+              imap.end();
+              resolve();
               return;
             }
-
             if (results.length === 0) {
-              console.log(`No new emails found in ${folderName}`);
-              completedFolders++;
-              if (completedFolders === foldersToCheck.length) {
-                imap.end();
-                resolve();
-              }
+              console.log('No new emails found in INBOX');
+              imap.end();
+              resolve();
               return;
             }
-
-            console.log(`Found ${results.length} new emails in ${folderName}`);
-            
+            console.log(`Found ${results.length} new emails in INBOX`);
             const fetch = imap.fetch(results, { bodies: '', struct: true });
-            
             fetch.on('message', (msg, seqno) => {
-              console.log(`📧 Processing message #${seqno} in ${folderName}, attributes:`, msg.attributes);
-              
+              console.log(`📧 Processing message #${seqno} in INBOX, attributes:`, msg.attributes);
               msg.on('body', (stream, info) => {
-                // Check if email has the "processed" label and skip if it does
                 if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
                   console.log('🚫 Skipping email with \'processed\' label:', msg.attributes.uid);
-                  return; // Skip processing this email
+                  return;
                 }
-                
-                // Pass the message attributes for UID access
                 processEmail(imap, stream, { uid: msg.attributes?.uid });
               });
             });
-
             fetch.once('error', (err) => {
-              console.error(`Fetch error in ${folderName}:`, err);
+              console.error('Fetch error in INBOX:', err);
             });
-
             fetch.once('end', () => {
-              console.log(`Finished processing ${folderName}`);
-              completedFolders++;
-              if (completedFolders === foldersToCheck.length) {
-                console.log('IMAP connection ended');
-                imap.end();
-                resolve();
-              }
+              console.log('Finished processing INBOX');
+              imap.end();
+              resolve();
             });
           });
         });
-      });
+      } catch (error) {
+        console.error('Error in checkEmails:', error);
+        imap.end();
+        resolve();
+      }
     });
-
     imap.once('error', (err) => {
       console.error('IMAP connection error:', err);
       reject(err);
     });
-
     imap.once('end', () => {
       console.log('IMAP connection ended');
       resolve();
     });
-
     imap.connect();
   });
 }
