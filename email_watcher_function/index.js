@@ -45,8 +45,14 @@ async function processEmail(imap, stream, info) {
     }
 
     // Skip if not from expected user
-    if (!from || !from.includes('richard.genet@gmail.com')) {
+    if (!from || !from.includes('foilboi@gmail.com')) {
       console.log(`Skipping email from: ${from}`);
+      return;
+    }
+
+    // Skip if subject is not "your new task"
+    if (!subject || !subject.toLowerCase().includes('your new task')) {
+      console.log(`Skipping email with subject: ${subject}`);
       return;
     }
 
@@ -68,8 +74,21 @@ async function processEmail(imap, stream, info) {
     const messageId_pubsub = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
     console.log(`✅ Published message ${messageId_pubsub}`);
 
-    // Mark as processed
+    // Mark as processed in memory
     processedEmails.add(messageId);
+
+    // Mark email as processed by adding the "processed" label
+    if (info && info.uid) {
+      imap.addFlags(info.uid, 'processed', (err) => {
+        if (err) {
+          console.error('❌ Failed to add processed label to email:', err);
+        } else {
+          console.log('✅ Added processed label to email UID:', info.uid);
+        }
+      });
+    } else {
+      console.log('⚠️ Could not add processed label (no UID available) - using message ID tracking instead');
+    }
 
   } catch (error) {
     console.error('Error processing email:', error);
@@ -109,11 +128,17 @@ async function checkEmails() {
 
           console.log(`Found ${results.length} new emails`);
           
-          const fetch = imap.fetch(results, { bodies: '' });
+          const fetch = imap.fetch(results, { bodies: '', struct: true });
           
           fetch.on('message', (msg, seqno) => {
             msg.on('body', (stream, info) => {
-              processEmail(imap, stream, info);
+              // Check if email has the "processed" label and skip if it does
+              if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
+                console.log('🚫 Skipping email with \'processed\' label:', msg.attributes.uid);
+                return; // Skip processing this email
+              }
+              
+              processEmail(imap, stream, { uid: msg.attributes.uid });
             });
           });
 

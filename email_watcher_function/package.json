@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "run-local": "node run_local.js",
     "deploy": "gcloud functions deploy email-watcher --gen2 --runtime=nodejs20 --region=us-central1 --source=. --entry-point=emailWatcher --trigger-http --memory=256MB --timeout=60s"
   },
   "dependencies": {
