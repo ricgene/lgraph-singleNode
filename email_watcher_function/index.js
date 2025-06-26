@@ -168,12 +168,15 @@ async function checkEmails() {
             const fetch = imap.fetch(recentEmails, { bodies: '', struct: true });
             fetch.on('message', (msg, seqno) => {
               console.log(`📧 Processing message #${seqno}, attributes:`, msg.attributes);
+              console.log(`📧 Message UID:`, msg.attributes?.uid);
               pendingOperations++;
               msg.on('body', (stream, info) => {
                 // Skip emails that are already in processed-tasks folder
                 // We can't easily check this here, so we'll let the processEmail function handle it
                 // by checking if the email can be moved to processed-tasks
-                processEmail(imap, stream, { uid: msg.attributes?.uid }).finally(() => {
+                const uid = msg.attributes?.uid;
+                console.log(`📧 Passing UID ${uid} to processEmail`);
+                processEmail(imap, stream, { uid: uid }).finally(() => {
                   pendingOperations--;
                   if (pendingOperations === 0) {
                     // Wait a bit for any pending move operations to complete
