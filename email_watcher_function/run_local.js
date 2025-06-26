@@ -2,7 +2,7 @@
 
 /**
  * Local email watcher runner
- * Continuously monitors Gmail for new emails from foilboi@gmail.com with "your new task" subject
+ * Continuously monitors Gmail for new emails from foilboi@gmail.com with "your new task from foilboi808" subject
  */
 
 const { emailWatcher } = require('./index.js');
@@ -21,7 +21,7 @@ const mockResponse = {
 
 async function runEmailWatcher() {
   console.log('🚀 Starting local email watcher...');
-  console.log('📧 Monitoring Gmail for emails from foilboi@gmail.com with "your new task" subject');
+  console.log('📧 Monitoring Gmail for emails from foilboi@gmail.com with "your new task from foilboi808" subject');
   console.log('🔄 Will check for new emails every 30 seconds');
   console.log('⏹️  Press Ctrl+C to stop');
   

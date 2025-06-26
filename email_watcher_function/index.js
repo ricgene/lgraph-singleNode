@@ -45,13 +45,9 @@ async function processEmail(imap, stream, info) {
     }
 
     // Skip if not from expected user
-    if (!from || !from.includes('foilboi@gmail.com')) {
-      console.log(`Skipping email from: ${from}`);
-      return;
-    }
-
-    // Skip if subject is not "your new task"
-    if (!subject || !subject.toLowerCase().includes('your new task')) {
+    // We're monitoring foilboi808@gmail.com for incoming emails, so we don't filter by sender
+    // Just check if the subject matches our pattern
+    if (!subject || !subject.toLowerCase().includes('your new task from foilboi808')) {
       console.log(`Skipping email with subject: ${subject}`);
       return;
     }
@@ -88,6 +84,7 @@ async function processEmail(imap, stream, info) {
       });
     } else {
       console.log('⚠️ Could not add processed label (no UID available) - using message ID tracking instead');
+      console.log('📧 Message ID for tracking:', messageId);
     }
 
   } catch (error) {
@@ -102,56 +99,79 @@ async function checkEmails() {
 
     imap.once('ready', () => {
       console.log('IMAP connection ready');
-      imap.openBox('INBOX', false, (err, box) => {
-        if (err) {
-          console.error('Error opening inbox:', err);
-          imap.end();
-          reject(err);
-          return;
-        }
-
-        // Search for unread emails
-        imap.search(['UNSEEN'], (err, results) => {
+      
+      // Check both INBOX and Social folders
+      const foldersToCheck = ['INBOX', '[Gmail]/Social'];
+      let completedFolders = 0;
+      
+      foldersToCheck.forEach(folderName => {
+        imap.openBox(folderName, false, (err, box) => {
           if (err) {
-            console.error('Search error:', err);
-            imap.end();
-            reject(err);
+            console.error(`Error opening ${folderName}:`, err);
+            completedFolders++;
+            if (completedFolders === foldersToCheck.length) {
+              imap.end();
+              resolve();
+            }
             return;
           }
 
-          if (results.length === 0) {
-            console.log('No new emails found');
-            imap.end();
-            resolve();
-            return;
-          }
+          console.log(`Checking folder: ${folderName}`);
 
-          console.log(`Found ${results.length} new emails`);
-          
-          const fetch = imap.fetch(results, { bodies: '', struct: true });
-          
-          fetch.on('message', (msg, seqno) => {
-            msg.on('body', (stream, info) => {
-              // Check if email has the "processed" label and skip if it does
-              if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
-                console.log('🚫 Skipping email with \'processed\' label:', msg.attributes.uid);
-                return; // Skip processing this email
+          // Search for unread emails
+          imap.search(['UNSEEN'], (err, results) => {
+            if (err) {
+              console.error(`Search error in ${folderName}:`, err);
+              completedFolders++;
+              if (completedFolders === foldersToCheck.length) {
+                imap.end();
+                resolve();
               }
+              return;
+            }
+
+            if (results.length === 0) {
+              console.log(`No new emails found in ${folderName}`);
+              completedFolders++;
+              if (completedFolders === foldersToCheck.length) {
+                imap.end();
+                resolve();
+              }
+              return;
+            }
+
+            console.log(`Found ${results.length} new emails in ${folderName}`);
+            
+            const fetch = imap.fetch(results, { bodies: '', struct: true });
+            
+            fetch.on('message', (msg, seqno) => {
+              console.log(`📧 Processing message #${seqno} in ${folderName}, attributes:`, msg.attributes);
               
-              processEmail(imap, stream, { uid: msg.attributes.uid });
+              msg.on('body', (stream, info) => {
+                // Check if email has the "processed" label and skip if it does
+                if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
+                  console.log('🚫 Skipping email with \'processed\' label:', msg.attributes.uid);
+                  return; // Skip processing this email
+                }
+                
+                // Pass the message attributes for UID access
+                processEmail(imap, stream, { uid: msg.attributes?.uid });
+              });
             });
-          });
 
-          fetch.once('error', (err) => {
-            console.error('Fetch error:', err);
-            imap.end();
-            reject(err);
-          });
+            fetch.once('error', (err) => {
+              console.error(`Fetch error in ${folderName}:`, err);
+            });
 
-          fetch.once('end', () => {
-            console.log('IMAP connection ended');
-            imap.end();
-            resolve();
+            fetch.once('end', () => {
+              console.log(`Finished processing ${folderName}`);
+              completedFolders++;
+              if (completedFolders === foldersToCheck.length) {
+                console.log('IMAP connection ended');
+                imap.end();
+                resolve();
+              }
+            });
           });
         });
       });
