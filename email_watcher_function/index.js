@@ -3,7 +3,6 @@ const { simpleParser } = require('mailparser');
 const { PubSub } = require('@google-cloud/pubsub');
 require('dotenv').config();
 
-// Simple config
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 const TOPIC_NAME = 'incoming-messages';
@@ -11,10 +10,8 @@ const TOPIC_NAME = 'incoming-messages';
 console.log('Gmail User:', GMAIL_USER);
 console.log('Starting email watcher function...');
 
-// Global variables
 const pubsub = new PubSub();
 
-// Simple IMAP connection
 function createImapConnection() {
   return new Imap({
     user: GMAIL_USER,
@@ -22,11 +19,53 @@ function createImapConnection() {
     host: 'imap.gmail.com',
     port: 993,
     tls: true,
-    tlsOptions: { rejectUnauthorized: false }
+    // Enable TLS certificate validation for production
+    tlsOptions: process.env.NODE_ENV === 'production' ? {} : { rejectUnauthorized: false }
   });
 }
 
-// Process a single email
+async function ensureProcessedFolder(imap) {
+  return new Promise((resolve, reject) => {
+    imap.getBoxes((err, boxes) => {
+      if (err) return reject(err);
+      if (boxes['Processed']) return resolve('Processed');
+      imap.addBox('Processed', (err) => {
+        if (err && !/already exists/i.test(err.message)) return reject(err);
+        resolve('Processed');
+      });
+    });
+  });
+}
+
+// Fetch Gmail labels for a specific UID
+async function getGmailLabels(imap, uid) {
+  return new Promise((resolve, reject) => {
+    const fetch = imap.fetch(uid, { bodies: [], struct: true, extensions: true });
+    let labels = [];
+    fetch.on('message', (msg) => {
+      msg.on('attributes', (attrs) => {
+        labels = attrs['x-gm-labels'] || [];
+      });
+    });
+    fetch.once('error', (err) => reject(err));
+    fetch.once('end', () => resolve(labels));
+  });
+}
+
+async function moveToProcessed(imap, uid) {
+  await ensureProcessedFolder(imap);
+  return new Promise((resolve, reject) => {
+    imap.move(uid, 'Processed', (err) => {
+      if (err) {
+        console.log('⚠️ Could not move email to Processed:', err);
+        return reject(err);
+      }
+      console.log('✅ Moved email to Processed folder');
+      resolve();
+    });
+  });
+}
+
 async function processEmail(imap, stream, info) {
   try {
     const parsed = await simpleParser(stream);
@@ -37,29 +76,15 @@ async function processEmail(imap, stream, info) {
 
     console.log(`🔍 Processing: ${subject} from "${parsed.from?.value?.[0]?.name}" <${from}>`);
 
-    // Skip if not from expected user
-    // We're monitoring foilboi808@gmail.com for incoming emails, so we don't filter by sender
-    // Just check if the subject matches our pattern
     if (!subject || !subject.toLowerCase().includes('your new task')) {
       console.log(`⏭️ Skipping email with subject: ${subject}`);
       return;
     }
 
-    // Skip if already processed (has processed label)
+    // Check for "Processed" label
     if (info.uid) {
-      // Check if email has processed label
-      const hasProcessedLabel = await new Promise((resolve) => {
-        imap.search(['UID', info.uid, 'X-GM-LABELS', 'processed'], (err, results) => {
-          if (err) {
-            console.log('❌ Error checking labels:', err);
-            resolve(false);
-            return;
-          }
-          resolve(results.length > 0);
-        });
-      });
-      
-      if (hasProcessedLabel) {
+      const labels = await getGmailLabels(imap, info.uid);
+      if (labels.map(l => l.toLowerCase()).includes('processed')) {
         console.log(`🚫 Already processed: ${messageId}`);
         return;
       }
@@ -69,7 +94,6 @@ async function processEmail(imap, stream, info) {
     console.log(`📧 From: ${from}`);
     console.log(`📝 Text preview: ${text.substring(0, 100)}...`);
 
-    // Publish to Pub/Sub
     const message = {
       userEmail: from,
       userResponse: text,
@@ -80,61 +104,25 @@ async function processEmail(imap, stream, info) {
     };
 
     console.log('📤 Publishing to Pub/Sub:', JSON.stringify(message, null, 2));
-
     try {
       const messageBuffer = Buffer.from(JSON.stringify(message));
-      const messageId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
-      console.log('✅ Published message', messageId);
-      
-      // Mark email for deletion after successful publish
+      const publishedId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
+      console.log('✅ Published message', publishedId);
+
+      // Move to Processed folder after successful publish
       if (info.uid) {
-        console.log(`🗑️ Marking email with UID ${info.uid} for deletion`);
-        imap.addFlags(info.uid, '\\Deleted', (err) => {
-          if (err) {
-            console.log('⚠️ Could not mark email for deletion:', err);
-          } else {
-            console.log('✅ Marked email for deletion');
-            // Expunge to actually delete the email
-            imap.expunge((err) => {
-              if (err) {
-                console.log('⚠️ Could not expunge deleted email:', err);
-              } else {
-                console.log('✅ Deleted email from INBOX');
-              }
-            });
-          }
-        });
-      } else if (info.seqno) {
-        // Fallback to sequence number if UID not available
-        console.log(`🗑️ Marking email with seqno ${info.seqno} for deletion`);
-        imap.addFlags(info.seqno, '\\Deleted', (err) => {
-          if (err) {
-            console.log('⚠️ Could not mark email for deletion:', err);
-          } else {
-            console.log('✅ Marked email for deletion');
-            // Expunge to actually delete the email
-            imap.expunge((err) => {
-              if (err) {
-                console.log('⚠️ Could not expunge deleted email:', err);
-              } else {
-                console.log('✅ Deleted email from INBOX');
-              }
-            });
-          }
-        });
+        await moveToProcessed(imap, info.uid);
       } else {
-        console.log('⚠️ No UID or seqno available for email deletion');
+        console.log('⚠️ No UID available for moving email');
       }
     } catch (error) {
       console.error('❌ Failed to publish to Pub/Sub:', error);
     }
-
   } catch (error) {
     console.error('❌ Error processing email:', error);
   }
 }
 
-// List available folders
 function listFolders(imap) {
   return new Promise((resolve, reject) => {
     imap.getBoxes((err, boxes) => {
@@ -143,7 +131,6 @@ function listFolders(imap) {
         reject(err);
         return;
       }
-      
       console.log('📁 Available folders:');
       function printBoxes(boxes, prefix = '') {
         for (const [name, box] of Object.entries(boxes)) {
@@ -159,7 +146,6 @@ function listFolders(imap) {
   });
 }
 
-// Main function to check emails
 async function checkEmails() {
   return new Promise((resolve, reject) => {
     const imap = createImapConnection();
@@ -168,9 +154,7 @@ async function checkEmails() {
     imap.once('ready', async () => {
       console.log('IMAP connection ready');
       try {
-        // List available folders (optional, for debugging)
         await listFolders(imap);
-        // Only check INBOX
         imap.openBox('INBOX', false, (err, box) => {
           if (err) {
             console.error('Error opening INBOX:', err);
@@ -179,7 +163,6 @@ async function checkEmails() {
             return;
           }
           console.log('Checking folder: INBOX');
-          // Use ALL instead of UNSEEN to avoid IMAP protocol errors
           imap.search(['ALL'], (err, results) => {
             if (err) {
               console.error('Search error in INBOX:', err);
@@ -194,26 +177,19 @@ async function checkEmails() {
               return;
             }
             console.log(`Found ${results.length} emails in INBOX`);
-            
-            // Only process the most recent 10 emails to avoid overwhelming
             const recentEmails = results.slice(-10);
             console.log(`Processing ${recentEmails.length} most recent emails`);
-            
-            const fetch = imap.fetch(recentEmails, { bodies: '', struct: true });
+            const fetch = imap.fetch(recentEmails, { bodies: '', struct: true, extensions: true });
             fetch.on('message', (msg, seqno) => {
-              console.log(`📧 Processing message #${seqno}, attributes:`, msg.attributes);
-              console.log(`📧 Message UID:`, msg.attributes?.uid);
-              pendingOperations++;
+              let uid = null;
+              msg.on('attributes', (attrs) => {
+                uid = attrs.uid;
+              });
               msg.on('body', (stream, info) => {
-                // Skip emails that are already in processed-tasks folder
-                // We can't easily check this here, so we'll let the processEmail function handle it
-                // by checking if the email can be moved to processed-tasks
-                const uid = msg.attributes?.uid;
-                console.log(`📧 Passing UID ${uid} to processEmail`);
+                pendingOperations++;
                 processEmail(imap, stream, { uid: uid, seqno: seqno }).finally(() => {
                   pendingOperations--;
                   if (pendingOperations === 0) {
-                    // Wait a bit for any pending move operations to complete
                     setTimeout(() => {
                       console.log('Finished processing INBOX');
                       imap.end();
@@ -229,7 +205,6 @@ async function checkEmails() {
               resolve();
             });
             fetch.once('end', () => {
-              // Don't end the connection here, wait for all operations to complete
               if (pendingOperations === 0) {
                 setTimeout(() => {
                   console.log('Finished processing INBOX');
@@ -258,7 +233,6 @@ async function checkEmails() {
   });
 }
 
-// Cloud Function entry point
 exports.emailWatcher = async (req, res) => {
   try {
     console.log('Email watcher function triggered');
@@ -268,4 +242,4 @@ exports.emailWatcher = async (req, res) => {
     console.error('Function error:', error);
     res.status(500).send(`Error: ${error.message}`);
   }
-}; 
+};
