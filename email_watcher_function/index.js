@@ -85,22 +85,22 @@ async function processEmail(imap, stream, info) {
       const messageId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
       console.log('✅ Published message', messageId);
       
-      // Add processed label to prevent reprocessing
+      // Delete email from INBOX after successful publish
       if (info.uid) {
-        imap.setLabels(info.uid, ['processed'], (err) => {
+        imap.del(info.uid, (err) => {
           if (err) {
-            console.log('⚠️ Could not add processed label:', err);
+            console.log('⚠️ Could not delete email:', err);
           } else {
-            console.log('✅ Added processed label to email');
+            console.log('✅ Deleted email from INBOX');
           }
         });
       } else if (info.seqno) {
         // Fallback to sequence number if UID not available
-        imap.setLabels(info.seqno, ['processed'], (err) => {
+        imap.del(info.seqno, (err) => {
           if (err) {
-            console.log('⚠️ Could not add processed label:', err);
+            console.log('⚠️ Could not delete email:', err);
           } else {
-            console.log('✅ Added processed label to email');
+            console.log('✅ Deleted email from INBOX');
           }
         });
       }
