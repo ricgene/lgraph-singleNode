@@ -70,16 +70,25 @@ async function processEmail(imap, stream, info) {
       if (info && info.uid) {
         console.log(`📁 Attempting to move email with UID ${info.uid} to processed-tasks folder`);
         
-        // Move the email to the processed-tasks folder
-        imap.move(info.uid, 'processed-tasks', (moveErr) => {
-          if (moveErr) {
-            console.error('❌ Failed to move email to processed-tasks:', moveErr);
-          } else {
-            console.log('✅ Moved email to processed-tasks folder');
+        // First, ensure the processed-tasks folder exists
+        imap.createBox('processed-tasks', (createErr) => {
+          if (createErr && createErr.code !== 'ALREADYEXISTS') {
+            console.error('❌ Failed to create processed-tasks folder:', createErr);
+            return;
           }
+          
+          // Now move the email to the processed-tasks folder
+          imap.move(info.uid, 'processed-tasks', (moveErr) => {
+            if (moveErr) {
+              console.error('❌ Failed to move email to processed-tasks:', moveErr);
+            } else {
+              console.log('✅ Moved email to processed-tasks folder');
+            }
+          });
         });
       } else {
         console.log('⚠️ No UID available for email move operation');
+        console.log('📋 Info object:', JSON.stringify(info, null, 2));
       }
       
     } catch (error) {
