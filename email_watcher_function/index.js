@@ -45,6 +45,26 @@ async function processEmail(imap, stream, info) {
       return;
     }
 
+    // Skip if already processed (has processed label)
+    if (info.uid) {
+      // Check if email has processed label
+      const hasProcessedLabel = await new Promise((resolve) => {
+        imap.search(['UID', info.uid, 'X-GM-LABELS', 'processed'], (err, results) => {
+          if (err) {
+            console.log('❌ Error checking labels:', err);
+            resolve(false);
+            return;
+          }
+          resolve(results.length > 0);
+        });
+      });
+      
+      if (hasProcessedLabel) {
+        console.log(`🚫 Already processed: ${messageId}`);
+        return;
+      }
+    }
+
     console.log(`✅ MATCH FOUND! Processing email with subject: ${subject}`);
     console.log(`📧 From: ${from}`);
     console.log(`📝 Text preview: ${text.substring(0, 100)}...`);
@@ -64,6 +84,17 @@ async function processEmail(imap, stream, info) {
       const messageBuffer = Buffer.from(JSON.stringify(message));
       const messageId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
       console.log('✅ Published message', messageId);
+      
+      // Add processed label to prevent reprocessing
+      if (info.uid) {
+        imap.addLabels(info.uid, ['processed'], (err) => {
+          if (err) {
+            console.log('⚠️ Could not add processed label:', err);
+          } else {
+            console.log('✅ Added processed label to email');
+          }
+        });
+      }
     } catch (error) {
       console.error('❌ Failed to publish to Pub/Sub:', error);
     }
