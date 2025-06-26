@@ -19,21 +19,7 @@ function createImapConnection() {
     host: 'imap.gmail.com',
     port: 993,
     tls: true,
-    // Enable TLS certificate validation for production
-    tlsOptions: process.env.NODE_ENV === 'production' ? {} : { rejectUnauthorized: false }
-  });
-}
-
-async function ensureProcessedFolder(imap) {
-  return new Promise((resolve, reject) => {
-    imap.getBoxes((err, boxes) => {
-      if (err) return reject(err);
-      if (boxes['Processed']) return resolve('Processed');
-      imap.addBox('Processed', (err) => {
-        if (err && !/already exists/i.test(err.message)) return reject(err);
-        resolve('Processed');
-      });
-    });
+    tlsOptions: { rejectUnauthorized: false }
   });
 }
 
@@ -52,16 +38,23 @@ async function getGmailLabels(imap, uid) {
   });
 }
 
-async function moveToProcessed(imap, uid) {
-  await ensureProcessedFolder(imap);
+// Delete email by UID (add \Deleted flag, then expunge)
+async function deleteEmail(imap, uid) {
   return new Promise((resolve, reject) => {
-    imap.move(uid, 'Processed', (err) => {
+    imap.addFlags(uid, '\\Deleted', (err) => {
       if (err) {
-        console.log('⚠️ Could not move email to Processed:', err);
+        console.log('⚠️ Could not mark email for deletion:', err);
         return reject(err);
       }
-      console.log('✅ Moved email to Processed folder');
-      resolve();
+      console.log('✅ Marked email for deletion');
+      imap.expunge((err) => {
+        if (err) {
+          console.log('⚠️ Could not expunge deleted emails:', err);
+          return reject(err);
+        }
+        console.log('✅ Deleted email from INBOX');
+        resolve();
+      });
     });
   });
 }
@@ -100,7 +93,7 @@ async function processEmail(imap, stream, info) {
       taskTitle: subject,
       timestamp: new Date().toISOString(),
       messageId: messageId,
-      seqno: info.seqno
+      uid: info.uid
     };
 
     console.log('📤 Publishing to Pub/Sub:', JSON.stringify(message, null, 2));
@@ -109,11 +102,11 @@ async function processEmail(imap, stream, info) {
       const publishedId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
       console.log('✅ Published message', publishedId);
 
-      // Move to Processed folder after successful publish
+      // Delete email after successful publish
       if (info.uid) {
-        await moveToProcessed(imap, info.uid);
+        await deleteEmail(imap, info.uid);
       } else {
-        console.log('⚠️ No UID available for moving email');
+        console.log('⚠️ No UID available for deleting email');
       }
     } catch (error) {
       console.error('❌ Failed to publish to Pub/Sub:', error);
