@@ -53,44 +53,17 @@ async function processEmail(imap, stream, info) {
     const message = {
       userEmail: from,
       userResponse: text,
-      taskTitle: 'Prizm Task Question',
+      taskTitle: subject,
       timestamp: new Date().toISOString(),
-      messageId: messageId,
-      emailUid: info?.uid
+      messageId: messageId
     };
 
-    console.log(`📤 Publishing to Pub/Sub: ${JSON.stringify(message, null, 2)}`);
+    console.log('📤 Publishing to Pub/Sub:', JSON.stringify(message, null, 2));
 
     try {
       const messageBuffer = Buffer.from(JSON.stringify(message));
-      const pubsubMessageId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
-      console.log(`✅ Published message ${pubsubMessageId}`);
-      
-      // Mark email as processed by moving it to the processed-tasks folder
-      if (info && info.uid) {
-        console.log(`📁 Attempting to move email with UID ${info.uid} to processed-tasks folder`);
-        
-        // First, ensure the processed-tasks folder exists
-        imap.createBox('processed-tasks', (createErr) => {
-          if (createErr && createErr.code !== 'ALREADYEXISTS') {
-            console.error('❌ Failed to create processed-tasks folder:', createErr);
-            return;
-          }
-          
-          // Now move the email to the processed-tasks folder
-          imap.move(info.uid, 'processed-tasks', (moveErr) => {
-            if (moveErr) {
-              console.error('❌ Failed to move email to processed-tasks:', moveErr);
-            } else {
-              console.log('✅ Moved email to processed-tasks folder');
-            }
-          });
-        });
-      } else {
-        console.log('⚠️ No UID available for email move operation');
-        console.log('📋 Info object:', JSON.stringify(info, null, 2));
-      }
-      
+      const messageId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
+      console.log('✅ Published message', messageId);
     } catch (error) {
       console.error('❌ Failed to publish to Pub/Sub:', error);
     }
@@ -176,7 +149,7 @@ async function checkEmails() {
                 // by checking if the email can be moved to processed-tasks
                 const uid = msg.attributes?.uid;
                 console.log(`📧 Passing UID ${uid} to processEmail`);
-                processEmail(imap, stream, { uid: uid }).finally(() => {
+                processEmail(imap, stream, { uid: uid, seqno: seqno }).finally(() => {
                   pendingOperations--;
                   if (pendingOperations === 0) {
                     // Wait a bit for any pending move operations to complete
