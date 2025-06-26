@@ -75,7 +75,8 @@ async function processEmail(imap, stream, info) {
       userResponse: text,
       taskTitle: subject,
       timestamp: new Date().toISOString(),
-      messageId: messageId
+      messageId: messageId,
+      seqno: info.seqno
     };
 
     console.log('📤 Publishing to Pub/Sub:', JSON.stringify(message, null, 2));
@@ -85,24 +86,44 @@ async function processEmail(imap, stream, info) {
       const messageId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
       console.log('✅ Published message', messageId);
       
-      // Delete email from INBOX after successful publish
+      // Mark email for deletion after successful publish
       if (info.uid) {
-        imap.del(info.uid, (err) => {
+        console.log(`🗑️ Marking email with UID ${info.uid} for deletion`);
+        imap.addFlags(info.uid, '\\Deleted', (err) => {
           if (err) {
-            console.log('⚠️ Could not delete email:', err);
+            console.log('⚠️ Could not mark email for deletion:', err);
           } else {
-            console.log('✅ Deleted email from INBOX');
+            console.log('✅ Marked email for deletion');
+            // Expunge to actually delete the email
+            imap.expunge((err) => {
+              if (err) {
+                console.log('⚠️ Could not expunge deleted email:', err);
+              } else {
+                console.log('✅ Deleted email from INBOX');
+              }
+            });
           }
         });
       } else if (info.seqno) {
         // Fallback to sequence number if UID not available
-        imap.del(info.seqno, (err) => {
+        console.log(`🗑️ Marking email with seqno ${info.seqno} for deletion`);
+        imap.addFlags(info.seqno, '\\Deleted', (err) => {
           if (err) {
-            console.log('⚠️ Could not delete email:', err);
+            console.log('⚠️ Could not mark email for deletion:', err);
           } else {
-            console.log('✅ Deleted email from INBOX');
+            console.log('✅ Marked email for deletion');
+            // Expunge to actually delete the email
+            imap.expunge((err) => {
+              if (err) {
+                console.log('⚠️ Could not expunge deleted email:', err);
+              } else {
+                console.log('✅ Deleted email from INBOX');
+              }
+            });
           }
         });
+      } else {
+        console.log('⚠️ No UID or seqno available for email deletion');
       }
     } catch (error) {
       console.error('❌ Failed to publish to Pub/Sub:', error);
