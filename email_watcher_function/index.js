@@ -87,7 +87,16 @@ async function processEmail(imap, stream, info) {
       
       // Add processed label to prevent reprocessing
       if (info.uid) {
-        imap.addLabels(info.uid, ['processed'], (err) => {
+        imap.setLabels(info.uid, ['processed'], (err) => {
+          if (err) {
+            console.log('⚠️ Could not add processed label:', err);
+          } else {
+            console.log('✅ Added processed label to email');
+          }
+        });
+      } else if (info.seqno) {
+        // Fallback to sequence number if UID not available
+        imap.setLabels(info.seqno, ['processed'], (err) => {
           if (err) {
             console.log('⚠️ Could not add processed label:', err);
           } else {
