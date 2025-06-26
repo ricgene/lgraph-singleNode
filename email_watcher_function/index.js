@@ -36,26 +36,29 @@ async function processEmail(imap, stream, info) {
     const subject = parsed.subject;
     const text = parsed.text || '';
 
-    console.log(`Processing: ${subject} from "${parsed.from?.value?.[0]?.name}" <${from}>`);
+    console.log(`🔍 Processing: ${subject} from "${parsed.from?.value?.[0]?.name}" <${from}>`);
 
     // Skip if already processed
     if (processedEmails.has(messageId)) {
-      console.log(`Already processed: ${messageId}`);
+      console.log(`🚫 Already processed: ${messageId}`);
       return;
     }
 
     // Skip if not from expected user
     // We're monitoring foilboi808@gmail.com for incoming emails, so we don't filter by sender
     // Just check if the subject matches our pattern
-    if (!subject || !subject.toLowerCase().includes('your new task from foilboi808')) {
-      console.log(`Skipping email with subject: ${subject}`);
+    if (!subject || !subject.toLowerCase().includes('your new task')) {
+      console.log(`⏭️ Skipping email with subject: ${subject}`);
       return;
     }
 
+    console.log(`✅ MATCH FOUND! Processing email with subject: ${subject}`);
+    console.log(`📧 From: ${from}`);
+    console.log(`📝 Text preview: ${text.substring(0, 100)}...`);
+
     // Extract user response (simple approach)
     const userResponse = text.trim().split('\n')[0];
-    console.log(`Processing reply from: ${from}`);
-    console.log(`User response: ${userResponse}`);
+    console.log(`💬 User response: ${userResponse}`);
 
     // Publish to Pub/Sub
     const messageData = {
@@ -66,12 +69,14 @@ async function processEmail(imap, stream, info) {
       messageId: messageId
     };
 
+    console.log(`📤 Publishing to Pub/Sub: ${JSON.stringify(messageData, null, 2)}`);
     const messageBuffer = Buffer.from(JSON.stringify(messageData));
     const messageId_pubsub = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
     console.log(`✅ Published message ${messageId_pubsub}`);
 
     // Mark as processed in memory
     processedEmails.add(messageId);
+    console.log(`💾 Marked as processed in memory: ${messageId}`);
 
     // Mark email as processed by adding the "processed" label
     if (info && info.uid) {
@@ -88,7 +93,7 @@ async function processEmail(imap, stream, info) {
     }
 
   } catch (error) {
-    console.error('Error processing email:', error);
+    console.error('❌ Error processing email:', error);
   }
 }
 
@@ -136,7 +141,8 @@ async function checkEmails() {
             return;
           }
           console.log('Checking folder: INBOX');
-          imap.search(['UNSEEN'], (err, results) => {
+          // Use ALL instead of UNSEEN to avoid IMAP protocol errors
+          imap.search(['ALL'], (err, results) => {
             if (err) {
               console.error('Search error in INBOX:', err);
               imap.end();
@@ -144,15 +150,20 @@ async function checkEmails() {
               return;
             }
             if (results.length === 0) {
-              console.log('No new emails found in INBOX');
+              console.log('No emails found in INBOX');
               imap.end();
               resolve();
               return;
             }
-            console.log(`Found ${results.length} new emails in INBOX`);
-            const fetch = imap.fetch(results, { bodies: '', struct: true });
+            console.log(`Found ${results.length} emails in INBOX`);
+            
+            // Only process the most recent 10 emails to avoid overwhelming
+            const recentEmails = results.slice(-10);
+            console.log(`Processing ${recentEmails.length} most recent emails`);
+            
+            const fetch = imap.fetch(recentEmails, { bodies: '', struct: true });
             fetch.on('message', (msg, seqno) => {
-              console.log(`📧 Processing message #${seqno} in INBOX, attributes:`, msg.attributes);
+              console.log(`📧 Processing message #${seqno}, attributes:`, msg.attributes);
               msg.on('body', (stream, info) => {
                 if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
                   console.log('🚫 Skipping email with \'processed\' label:', msg.attributes.uid);
