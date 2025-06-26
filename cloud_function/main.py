@@ -428,11 +428,26 @@ def process_email_pubsub(cloud_event):
     """Cloud Function entry point for processing emails via Pub/Sub trigger."""
     
     try:
-        # Decode the Pub/Sub message
-        pubsub_message = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8")
-        message_data = json.loads(pubsub_message)
+        logger.info(f"📨 Received cloud event: {json.dumps(cloud_event.data, indent=2)}")
         
-        logger.info(f"📨 Received Pub/Sub message: {json.dumps(message_data, indent=2)}")
+        # Check if we have the expected message structure
+        if "message" not in cloud_event.data:
+            logger.error("❌ No 'message' field in cloud event data")
+            return
+        
+        if "data" not in cloud_event.data["message"]:
+            logger.error("❌ No 'data' field in message")
+            return
+        
+        # Decode the Pub/Sub message
+        try:
+            pubsub_message = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8")
+            logger.info(f"📨 Decoded Pub/Sub message: {pubsub_message}")
+            message_data = json.loads(pubsub_message)
+        except Exception as decode_error:
+            logger.error(f"❌ Error decoding message: {decode_error}")
+            logger.error(f"📨 Raw message data: {cloud_event.data['message']['data']}")
+            return
         
         # Extract data from the message
         user_email = message_data.get('userEmail')

@@ -80,15 +80,23 @@ async function processEmail(imap, stream, info) {
 
     // Mark email as processed by adding the "processed" label
     if (info && info.uid) {
-      imap.addFlags(info.uid, 'processed', (err) => {
-        if (err) {
-          console.error('❌ Failed to add processed label to email:', err);
+      // First, create the label if it doesn't exist
+      imap.addBox('processed-tasks', (err) => {
+        if (err && err.code !== 'ALREADYEXISTS') {
+          console.error('❌ Failed to create processed-tasks label:', err);
         } else {
-          console.log('✅ Added processed label to email UID:', info.uid);
+          // Move the email to the processed-tasks folder
+          imap.move(info.uid, 'processed-tasks', (moveErr) => {
+            if (moveErr) {
+              console.error('❌ Failed to move email to processed-tasks:', moveErr);
+            } else {
+              console.log('✅ Moved email to processed-tasks folder, UID:', info.uid);
+            }
+          });
         }
       });
     } else {
-      console.log('⚠️ Could not add processed label (no UID available) - using message ID tracking instead');
+      console.log('⚠️ Could not move email to processed folder (no UID available) - using message ID tracking instead');
       console.log('📧 Message ID for tracking:', messageId);
     }
 
@@ -165,8 +173,9 @@ async function checkEmails() {
             fetch.on('message', (msg, seqno) => {
               console.log(`📧 Processing message #${seqno}, attributes:`, msg.attributes);
               msg.on('body', (stream, info) => {
-                if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed')) {
-                  console.log('🚫 Skipping email with \'processed\' label:', msg.attributes.uid);
+                // Skip emails that are already in processed-tasks folder
+                if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed-tasks')) {
+                  console.log('🚫 Skipping email already in processed-tasks folder:', msg.attributes.uid);
                   return;
                 }
                 processEmail(imap, stream, { uid: msg.attributes?.uid });
