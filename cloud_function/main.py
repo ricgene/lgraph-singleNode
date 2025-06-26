@@ -270,7 +270,20 @@ def process_user_response(user_email, user_response, conversation_state):
         return response_data
         
     except Exception as error:
-        logger.error(f"❌ Error processing with LangGraph for {user_email}: {error}")
+        error_message = str(error)
+        logger.error(f"❌ Error processing with LangGraph for {user_email}: {error_message}")
+        
+        # Check if it's a quota/rate limit error
+        if "quota" in error_message.lower() or "rate limit" in error_message.lower() or "429" in error_message:
+            logger.warning(f"⚠️ OpenAI quota/rate limit detected for {user_email}")
+            return {
+                "question": "I'm currently experiencing high demand and my processing capacity is temporarily limited. Your task has been received and stored. I'll process it as soon as possible.",
+                "conversation_history": conversation_state.get("conversation_history", ""),
+                "is_complete": False,
+                "completion_state": "QUOTA_EXCEEDED",
+                "user_email": user_email
+            }
+        
         logger.exception("Full traceback:")
         return None
 
@@ -573,9 +586,16 @@ Please help me process this task request.
         
         if not result:
             logger.error(f'❌ LangGraph processing failed for {processing_email}')
-            if user_email != 'foilboi@gmail.com':
-                clear_email_lock(user_email, task_title)
-            return
+            # Create a fallback response when LangGraph fails
+            fallback_result = {
+                "question": "I'm currently experiencing technical difficulties with my AI processing. Your task has been received and stored. I'll process it as soon as possible.",
+                "conversation_history": conversation_state.get("conversation_history", ""),
+                "is_complete": False,
+                "completion_state": "QUOTA_EXCEEDED",
+                "user_email": processing_email
+            }
+            logger.info(f'📝 Using fallback response due to LangGraph failure: {json.dumps(fallback_result, indent=2)}')
+            result = fallback_result
         
         # Update task with conversation history
         if task_data_firestore:

@@ -11,8 +11,7 @@ const TOPIC_NAME = 'incoming-messages';
 console.log('Gmail User:', GMAIL_USER);
 console.log('Starting email watcher function...');
 
-// Simple tracking
-const processedEmails = new Set();
+// Global variables
 const pubsub = new PubSub();
 
 // Simple IMAP connection
@@ -38,12 +37,6 @@ async function processEmail(imap, stream, info) {
 
     console.log(`🔍 Processing: ${subject} from "${parsed.from?.value?.[0]?.name}" <${from}>`);
 
-    // Skip if already processed
-    if (processedEmails.has(messageId)) {
-      console.log(`🚫 Already processed: ${messageId}`);
-      return;
-    }
-
     // Skip if not from expected user
     // We're monitoring foilboi808@gmail.com for incoming emails, so we don't filter by sender
     // Just check if the subject matches our pattern
@@ -56,48 +49,41 @@ async function processEmail(imap, stream, info) {
     console.log(`📧 From: ${from}`);
     console.log(`📝 Text preview: ${text.substring(0, 100)}...`);
 
-    // Extract user response (simple approach)
-    const userResponse = text.trim().split('\n')[0];
-    console.log(`💬 User response: ${userResponse}`);
-
     // Publish to Pub/Sub
-    const messageData = {
+    const message = {
       userEmail: from,
-      userResponse: userResponse,
+      userResponse: text,
       taskTitle: 'Prizm Task Question',
       timestamp: new Date().toISOString(),
-      messageId: messageId
+      messageId: messageId,
+      emailUid: info?.uid
     };
 
-    console.log(`📤 Publishing to Pub/Sub: ${JSON.stringify(messageData, null, 2)}`);
-    const messageBuffer = Buffer.from(JSON.stringify(messageData));
-    const messageId_pubsub = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
-    console.log(`✅ Published message ${messageId_pubsub}`);
+    console.log(`📤 Publishing to Pub/Sub: ${JSON.stringify(message, null, 2)}`);
 
-    // Mark as processed in memory
-    processedEmails.add(messageId);
-    console.log(`💾 Marked as processed in memory: ${messageId}`);
-
-    // Mark email as processed by adding the "processed" label
-    if (info && info.uid) {
-      // First, create the label if it doesn't exist
-      imap.addBox('processed-tasks', (err) => {
-        if (err && err.code !== 'ALREADYEXISTS') {
-          console.error('❌ Failed to create processed-tasks label:', err);
-        } else {
-          // Move the email to the processed-tasks folder
-          imap.move(info.uid, 'processed-tasks', (moveErr) => {
-            if (moveErr) {
-              console.error('❌ Failed to move email to processed-tasks:', moveErr);
-            } else {
-              console.log('✅ Moved email to processed-tasks folder, UID:', info.uid);
-            }
-          });
-        }
-      });
-    } else {
-      console.log('⚠️ Could not move email to processed folder (no UID available) - using message ID tracking instead');
-      console.log('📧 Message ID for tracking:', messageId);
+    try {
+      const messageBuffer = Buffer.from(JSON.stringify(message));
+      const pubsubMessageId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
+      console.log(`✅ Published message ${pubsubMessageId}`);
+      
+      // Mark email as processed by moving it to the processed-tasks folder
+      if (info && info.uid) {
+        console.log(`📁 Attempting to move email with UID ${info.uid} to processed-tasks folder`);
+        
+        // Move the email to the processed-tasks folder
+        imap.move(info.uid, 'processed-tasks', (moveErr) => {
+          if (moveErr) {
+            console.error('❌ Failed to move email to processed-tasks:', moveErr);
+          } else {
+            console.log('✅ Moved email to processed-tasks folder');
+          }
+        });
+      } else {
+        console.log('⚠️ No UID available for email move operation');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to publish to Pub/Sub:', error);
     }
 
   } catch (error) {
@@ -134,6 +120,7 @@ function listFolders(imap) {
 async function checkEmails() {
   return new Promise((resolve, reject) => {
     const imap = createImapConnection();
+    let pendingOperations = 0;
 
     imap.once('ready', async () => {
       console.log('IMAP connection ready');
@@ -172,22 +159,38 @@ async function checkEmails() {
             const fetch = imap.fetch(recentEmails, { bodies: '', struct: true });
             fetch.on('message', (msg, seqno) => {
               console.log(`📧 Processing message #${seqno}, attributes:`, msg.attributes);
+              pendingOperations++;
               msg.on('body', (stream, info) => {
                 // Skip emails that are already in processed-tasks folder
-                if (msg.attributes && msg.attributes.flags && msg.attributes.flags.includes('processed-tasks')) {
-                  console.log('🚫 Skipping email already in processed-tasks folder:', msg.attributes.uid);
-                  return;
-                }
-                processEmail(imap, stream, { uid: msg.attributes?.uid });
+                // We can't easily check this here, so we'll let the processEmail function handle it
+                // by checking if the email can be moved to processed-tasks
+                processEmail(imap, stream, { uid: msg.attributes?.uid }).finally(() => {
+                  pendingOperations--;
+                  if (pendingOperations === 0) {
+                    // Wait a bit for any pending move operations to complete
+                    setTimeout(() => {
+                      console.log('Finished processing INBOX');
+                      imap.end();
+                      resolve();
+                    }, 2000);
+                  }
+                });
               });
             });
             fetch.once('error', (err) => {
               console.error('Fetch error in INBOX:', err);
-            });
-            fetch.once('end', () => {
-              console.log('Finished processing INBOX');
               imap.end();
               resolve();
+            });
+            fetch.once('end', () => {
+              // Don't end the connection here, wait for all operations to complete
+              if (pendingOperations === 0) {
+                setTimeout(() => {
+                  console.log('Finished processing INBOX');
+                  imap.end();
+                  resolve();
+                }, 2000);
+              }
             });
           });
         });
