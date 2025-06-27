@@ -373,7 +373,10 @@ def print_result_details(result, turn_num):
     """Print detailed result information"""
     print(f"\n📊 Turn {turn_num} Result Details:")
     print("=" * 60)
-    print(f"🤖 Question: {result.get('question', 'No question')}")
+    
+    if VERBOSE:
+        print(f"🤖 Question: {result.get('question', 'No question')}")
+    
     print(f"✅ Is Complete: {result.get('is_complete', False)}")
     print(f"🎯 Completion State: {result.get('completion_state', 'Not set')}")
     print(f"📧 User Email: {result.get('user_email', 'Not set')}")
