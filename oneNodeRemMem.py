@@ -229,9 +229,10 @@ Prizm Real Estate Concierge Service"""
 builder = StateGraph(DeckState)
 builder.add_node("collect_info", process_message)
 builder.set_entry_point("collect_info")
+
 builder.add_conditional_edges(
     "collect_info",
-    lambda state: END if (hasattr(state, 'is_complete') and state.is_complete) or (isinstance(state, dict) and state.get('is_complete', False)) else "collect_info"
+    lambda state: END  # Always transition to END
 )
 graph = builder.compile()
 
