@@ -638,8 +638,26 @@ Please help me process this task request.
         logger.info(f'✅ Successfully processed email from {user_email}')
         logger.info(f'📤 LangGraph result: {json.dumps(result, indent=2)}')
         
-        # TODO: Add email sending logic here if needed
-        # For now, just log the result
+        # Send email response to user
+        if result and result.get('question'):
+            email_subject = "Prizm Task Update"
+            email_body = f"""
+Hello,
+
+{result['question']}
+
+Best regards,
+Prizm Agent
+            """.strip()
+            
+            # Send email to the user
+            email_sent = send_email_via_gcp(user_email, email_subject, email_body)
+            if email_sent:
+                logger.info(f'📧 Email response sent successfully to {user_email}')
+            else:
+                logger.error(f'❌ Failed to send email response to {user_email}')
+        else:
+            logger.warning(f'⚠️ No question in result to send to {user_email}')
         
     except Exception as error:
         logger.error(f'❌ Cloud function error in process_email_pubsub: {error}')
@@ -727,4 +745,24 @@ def parse_foilboi_email_body(email_body):
     except Exception as error:
         logger.error(f'❌ Error parsing foilboi email body: {error}')
         logger.exception("Full traceback:")
-        return None 
+        return None
+
+def send_email_via_gcp(recipient_email: str, subject: str, body: str) -> bool:
+    """Sends an email by calling the deployed GCP email function."""
+    # Use the environment variable for the email function URL
+    email_function_url = os.getenv('EMAIL_FUNCTION_URL', 'https://us-central1-prizmpoc.cloudfunctions.net/send-email-simple')
+    if not email_function_url:
+        logger.error("❌ EMAIL_FUNCTION_URL not found in environment variables.")
+        return False
+    try:
+        payload = {"to": recipient_email, "subject": subject, "body": body}
+        response = requests.post(email_function_url, json=payload, timeout=30)
+        if response.status_code == 200:
+            logger.info(f"✅ Email sent successfully to {recipient_email}")
+            return True
+        else:
+            logger.error(f"❌ Email function returned status {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Error sending email: {str(e)}")
+        return False 
