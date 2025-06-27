@@ -500,16 +500,15 @@ def process_email_pubsub(cloud_event):
             
             # Create the initial user response for LangGraph
             initial_response = f"""
-Task Request Details:
-- Customer: {customer_name} ({customer_email})
-- Task Number: {task_number}
-- Category: {category}
-- Description: {task_description}
-- Due Date: {due_date}
-- State: {state}
-- Vendors: {vendors}
+I have a new task request for you to process:
 
-Please help me process this task request.
+Customer: {customer_name} ({customer_email})
+Task: {task_number} - {category}
+Description: {task_description}
+Due Date: {due_date}
+State: {state}
+
+Please start the conversation to help this customer with their task.
 """
             
             # For the first call, we don't need to check for existing tasks
