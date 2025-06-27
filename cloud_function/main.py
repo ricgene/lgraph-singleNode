@@ -232,12 +232,27 @@ def process_user_response(user_email, user_response, conversation_state):
         # Extract the response from the graph output
         # The oneNodeRemMem returns a specific format with question, conversation_history, etc.
         if graph_output:
+            logger.info(f"📊 Graph output contains {len(graph_output)} chunks")
+            
             # Look for the final response in the graph output
             final_response = None
+            
+            # First, try to find a chunk with the expected format
             for chunk in reversed(graph_output):
-                if isinstance(chunk, dict) and "question" in chunk:
-                    final_response = chunk
-                    break
+                logger.info(f"🔍 Examining chunk: {type(chunk)} - {chunk}")
+                if isinstance(chunk, dict):
+                    if "question" in chunk:
+                        final_response = chunk
+                        logger.info(f"✅ Found response with question: {chunk}")
+                        break
+                    elif "output" in chunk and isinstance(chunk["output"], dict) and "question" in chunk["output"]:
+                        final_response = chunk["output"]
+                        logger.info(f"✅ Found response in output: {chunk['output']}")
+                        break
+                    elif "value" in chunk and isinstance(chunk["value"], dict) and "question" in chunk["value"]:
+                        final_response = chunk["value"]
+                        logger.info(f"✅ Found response in value: {chunk['value']}")
+                        break
             
             if final_response:
                 response_data = {
@@ -248,14 +263,43 @@ def process_user_response(user_email, user_response, conversation_state):
                     "user_email": final_response.get("user_email", user_email)
                 }
             else:
-                # Fallback if we can't find the expected response format
-                response_data = {
-                    "question": "Processing completed",
-                    "conversation_history": conversation_state.get("conversation_history", ""),
-                    "is_complete": False,
-                    "completion_state": "OTHER",
-                    "user_email": user_email
-                }
+                # Try to extract any meaningful response from the chunks
+                logger.warning(f"⚠️ Could not find expected response format in {len(graph_output)} chunks")
+                logger.info(f"📋 Available chunks: {[type(chunk) for chunk in graph_output]}")
+                
+                # Look for any text content in the chunks
+                text_content = ""
+                for chunk in graph_output:
+                    if isinstance(chunk, dict):
+                        if "text" in chunk:
+                            text_content = chunk["text"]
+                            break
+                        elif "content" in chunk:
+                            text_content = chunk["content"]
+                            break
+                        elif "message" in chunk:
+                            text_content = chunk["message"]
+                            break
+                
+                if text_content:
+                    response_data = {
+                        "question": text_content,
+                        "conversation_history": conversation_state.get("conversation_history", ""),
+                        "is_complete": False,
+                        "completion_state": "OTHER",
+                        "user_email": user_email
+                    }
+                    logger.info(f"📝 Using extracted text content: {text_content[:100]}...")
+                else:
+                    # Fallback if we can't find any meaningful response
+                    response_data = {
+                        "question": "I've received your task request and will start processing it. Please wait for my next response.",
+                        "conversation_history": conversation_state.get("conversation_history", ""),
+                        "is_complete": False,
+                        "completion_state": "OTHER",
+                        "user_email": user_email
+                    }
+                    logger.warning(f"⚠️ No meaningful content found, using fallback response")
         else:
             # No output received
             response_data = {
