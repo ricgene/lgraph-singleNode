@@ -434,7 +434,7 @@ def process_email(request: Request):
             'success': False,
             'message': 'Internal server error',
             'error': str(error)
-        }), 500, response_headers)
+        }), 500, response_headers) 
 
 @functions_framework.cloud_event
 def process_email_pubsub(cloud_event):

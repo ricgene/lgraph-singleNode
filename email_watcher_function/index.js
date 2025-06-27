@@ -1,17 +1,52 @@
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
 const { PubSub } = require('@google-cloud/pubsub');
+const { Firestore } = require('@google-cloud/firestore');
 require('dotenv').config();
 
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 const TOPIC_NAME = 'incoming-messages';
 
+const firestore = new Firestore();
+const COLLECTION = 'processedEmails';
+const pubsub = new PubSub();
+
 console.log('Gmail User:', GMAIL_USER);
 console.log('Starting email watcher function...');
 
-const pubsub = new PubSub();
+// Firestore helpers with enhanced logging
+async function isProcessed(messageId) {
+  if (!messageId) return false;
+  try {
+    const doc = await firestore.collection(COLLECTION).doc(messageId).get();
+    if (doc.exists) {
+      console.log(`ℹ️ Message-ID ${messageId} found in Firestore (already processed)`);
+      return true;
+    }
+    console.log(`ℹ️ Message-ID ${messageId} not found in Firestore (not processed)`);
+    return false;
+  } catch (err) {
+    console.error(`❌ Firestore error checking processed status for ${messageId}: ${err.message}`);
+    // Fail safe: treat as not processed to avoid missing emails
+    return false;
+  }
+}
 
+async function markProcessed(messageId, meta = {}) {
+  if (!messageId) return;
+  try {
+    await firestore.collection(COLLECTION).doc(messageId).set({
+      processedAt: new Date().toISOString(),
+      ...meta
+    });
+    console.log(`✅ Marked as processed in Firestore: ${messageId}`);
+  } catch (err) {
+    console.error(`❌ Firestore error marking processed for ${messageId}: ${err.message}`);
+  }
+}
+
+// IMAP connection
 function createImapConnection() {
   return new Imap({
     user: GMAIL_USER,
@@ -23,42 +58,7 @@ function createImapConnection() {
   });
 }
 
-// Fetch Gmail labels for a specific UID
-async function getGmailLabels(imap, uid) {
-  return new Promise((resolve, reject) => {
-    const fetch = imap.fetch(uid, { bodies: [], struct: true, extensions: true });
-    let labels = [];
-    fetch.on('message', (msg) => {
-      msg.on('attributes', (attrs) => {
-        labels = attrs['x-gm-labels'] || [];
-      });
-    });
-    fetch.once('error', (err) => reject(err));
-    fetch.once('end', () => resolve(labels));
-  });
-}
-
-// Delete email by UID (add \Deleted flag, then expunge)
-async function deleteEmail(imap, uid) {
-  return new Promise((resolve, reject) => {
-    imap.addFlags(uid, '\\Deleted', (err) => {
-      if (err) {
-        console.log('⚠️ Could not mark email for deletion:', err);
-        return reject(err);
-      }
-      console.log('✅ Marked email for deletion');
-      imap.expunge((err) => {
-        if (err) {
-          console.log('⚠️ Could not expunge deleted emails:', err);
-          return reject(err);
-        }
-        console.log('✅ Deleted email from INBOX');
-        resolve();
-      });
-    });
-  });
-}
-
+// Main email processing
 async function processEmail(imap, stream, info) {
   try {
     const parsed = await simpleParser(stream);
@@ -67,20 +67,20 @@ async function processEmail(imap, stream, info) {
     const subject = parsed.subject;
     const text = parsed.text || '';
 
-    console.log(`🔍 Processing: ${subject} from "${parsed.from?.value?.[0]?.name}" <${from}>`);
+    if (!messageId) {
+      console.log('No Message-ID found, skipping.');
+      return;
+    }
+
+    // Firestore deduplication with logging
+    if (await isProcessed(messageId)) {
+      console.log(`🚫 Already processed: ${messageId}`);
+      return;
+    }
 
     if (!subject || !subject.toLowerCase().includes('your new task')) {
       console.log(`⏭️ Skipping email with subject: ${subject}`);
       return;
-    }
-
-    // Check for "Processed" label
-    if (info.uid) {
-      const labels = await getGmailLabels(imap, info.uid);
-      if (labels.map(l => l.toLowerCase()).includes('processed')) {
-        console.log(`🚫 Already processed: ${messageId}`);
-        return;
-      }
     }
 
     console.log(`✅ MATCH FOUND! Processing email with subject: ${subject}`);
@@ -92,22 +92,17 @@ async function processEmail(imap, stream, info) {
       userResponse: text,
       taskTitle: subject,
       timestamp: new Date().toISOString(),
-      messageId: messageId,
-      uid: info.uid
+      messageId: messageId
     };
 
-    console.log('📤 Publishing to Pub/Sub:', JSON.stringify(message, null, 2));
+    // Publish to Pub/Sub
     try {
       const messageBuffer = Buffer.from(JSON.stringify(message));
       const publishedId = await pubsub.topic(TOPIC_NAME).publish(messageBuffer);
       console.log('✅ Published message', publishedId);
 
-      // Delete email after successful publish
-      if (info.uid) {
-        await deleteEmail(imap, info.uid);
-      } else {
-        console.log('⚠️ No UID available for deleting email');
-      }
+      // Mark as processed in Firestore with logging
+      await markProcessed(messageId, { from, subject });
     } catch (error) {
       console.error('❌ Failed to publish to Pub/Sub:', error);
     }
@@ -116,6 +111,7 @@ async function processEmail(imap, stream, info) {
   }
 }
 
+// List folders for debugging
 function listFolders(imap) {
   return new Promise((resolve, reject) => {
     imap.getBoxes((err, boxes) => {
@@ -139,6 +135,7 @@ function listFolders(imap) {
   });
 }
 
+// Main check function
 async function checkEmails() {
   return new Promise((resolve, reject) => {
     const imap = createImapConnection();
@@ -226,6 +223,7 @@ async function checkEmails() {
   });
 }
 
+// Exported function for serverless/cloud function use
 exports.emailWatcher = async (req, res) => {
   try {
     console.log('Email watcher function triggered');

@@ -6,15 +6,16 @@
   "scripts": {
     "start": "node index.js",
     "run-local": "node run_local.js",
-    "deploy": "gcloud functions deploy email-watcher --gen2 --runtime=nodejs20 --region=us-central1 --source=. --entry-point=emailWatcher --trigger-http --memory=256MB --timeout=60s"
+    "deploy": "gcloud functions deploy email-watcher --gen2 --runtime=nodejs20 --region=us-central1 --source=. --entry-point=emailWatcher --trigger-http --memory=256MB --timeout=60s --set-env-vars GMAIL_USER=foilboi808@gmail.com,GMAIL_APP_PASSWORD=hhdoyudorouxuymq"
   },
   "dependencies": {
-    "imap": "^0.8.19",
-    "mailparser": "^3.6.5",
+    "@google-cloud/firestore": "^7.11.2",
     "@google-cloud/pubsub": "^4.0.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.5"
   },
   "engines": {
     "node": "20"
   }
-} 
+}

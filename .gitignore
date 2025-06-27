@@ -87,3 +87,6 @@ jspm_packages/
 
 # Conversation states (persistent data)
 conversation_states.json 
+
+# Email watcher function
+email_watcher_function/fbserviceAccountKey-admin.json 
