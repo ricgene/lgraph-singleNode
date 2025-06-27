@@ -272,11 +272,14 @@ def run_mock_agent(payload, turn_num):
     if previous_state is None:
         conversation_history = ""
         user_email = "test@example.com"
-        turn_count = turn_num
+        turn_count = 0
     else:
         conversation_history = previous_state.get('conversation_history', '')
         user_email = previous_state.get('user_email', 'test@example.com')
-        turn_count = turn_num
+        turn_count = previous_state.get('turn_count', 0)
+    
+    # Increment turn count
+    turn_count += 1
     
     if VERBOSE:
         print(f"🔄 Turn count: {turn_count}")
@@ -371,7 +374,8 @@ def print_result_details(result, turn_num):
     print(f"\n📊 Turn {turn_num} Result Details:")
     print("=" * 60)
     
-    print(f"🤖 Question: {result.get('question', 'No question')}")
+    if VERBOSE:
+        print(f"🤖 Question: {result.get('question', 'No question')}")
     
     print(f"✅ Is Complete: {result.get('is_complete', False)}")
     print(f"🎯 Completion State: {result.get('completion_state', 'Not set')}")

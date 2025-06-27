@@ -1,0 +1,192 @@
+{
+  "timestamp": "2025-06-27T17:33:05.262675",
+  "turn_number": 1,
+  "turn_type": "input",
+  "data": {
+    "user_input": "",
+    "user_first_name": "TestUser",
+    "task_name": "Kitchen Renovation",
+    "previous_state": null
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.264112",
+  "turn_number": 1,
+  "turn_type": "output",
+  "data": {
+    "question": "Debug question 1 for TestUser about Kitchen Renovation",
+    "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:",
+    "is_complete": false,
+    "completion_state": "OTHER",
+    "user_email": "test@example.com",
+    "turn_count": 1
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.264391",
+  "turn_number": 2,
+  "turn_type": "input",
+  "data": {
+    "user_input": "Yes, I'm ready to discuss my task",
+    "user_first_name": "TestUser",
+    "task_name": "Kitchen Renovation",
+    "previous_state": {
+      "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:",
+      "all_info_collected": false,
+      "user_email": "test@example.com"
+    }
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.265528",
+  "turn_number": 2,
+  "turn_type": "output",
+  "data": {
+    "question": "Debug question 1 for TestUser about Kitchen Renovation",
+    "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task",
+    "is_complete": false,
+    "completion_state": "OTHER",
+    "user_email": "test@example.com",
+    "turn_count": 1
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.265998",
+  "turn_number": 3,
+  "turn_type": "input",
+  "data": {
+    "user_input": "I need help with kitchen renovation",
+    "user_first_name": "TestUser",
+    "task_name": "Kitchen Renovation",
+    "previous_state": {
+      "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task",
+      "all_info_collected": false,
+      "user_email": "test@example.com"
+    }
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.267172",
+  "turn_number": 3,
+  "turn_type": "output",
+  "data": {
+    "question": "Debug question 1 for TestUser about Kitchen Renovation",
+    "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation",
+    "is_complete": false,
+    "completion_state": "OTHER",
+    "user_email": "test@example.com",
+    "turn_count": 1
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.267508",
+  "turn_number": 4,
+  "turn_type": "input",
+  "data": {
+    "user_input": "Yes, I'll reach out to the contractor",
+    "user_first_name": "TestUser",
+    "task_name": "Kitchen Renovation",
+    "previous_state": {
+      "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation",
+      "all_info_collected": false,
+      "user_email": "test@example.com"
+    }
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.268578",
+  "turn_number": 4,
+  "turn_type": "output",
+  "data": {
+    "question": "Debug question 1 for TestUser about Kitchen Renovation",
+    "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'll reach out to the contractor",
+    "is_complete": false,
+    "completion_state": "OTHER",
+    "user_email": "test@example.com",
+    "turn_count": 1
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.268906",
+  "turn_number": 5,
+  "turn_type": "input",
+  "data": {
+    "user_input": "No concerns, thanks!",
+    "user_first_name": "TestUser",
+    "task_name": "Kitchen Renovation",
+    "previous_state": {
+      "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'll reach out to the contractor",
+      "all_info_collected": false,
+      "user_email": "test@example.com"
+    }
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.269948",
+  "turn_number": 5,
+  "turn_type": "output",
+  "data": {
+    "question": "Debug question 1 for TestUser about Kitchen Renovation",
+    "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'll reach out to the contractor\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: No concerns, thanks!",
+    "is_complete": false,
+    "completion_state": "OTHER",
+    "user_email": "test@example.com",
+    "turn_count": 1
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.270388",
+  "turn_number": 6,
+  "turn_type": "input",
+  "data": {
+    "user_input": "Everything looks good",
+    "user_first_name": "TestUser",
+    "task_name": "Kitchen Renovation",
+    "previous_state": {
+      "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'll reach out to the contractor\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: No concerns, thanks!",
+      "all_info_collected": false,
+      "user_email": "test@example.com"
+    }
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.271510",
+  "turn_number": 6,
+  "turn_type": "output",
+  "data": {
+    "question": "Debug question 1 for TestUser about Kitchen Renovation",
+    "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'll reach out to the contractor\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: No concerns, thanks!\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Everything looks good",
+    "is_complete": false,
+    "completion_state": "OTHER",
+    "user_email": "test@example.com",
+    "turn_count": 1
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.271772",
+  "turn_number": 7,
+  "turn_type": "input",
+  "data": {
+    "user_input": "Let's proceed",
+    "user_first_name": "TestUser",
+    "task_name": "Kitchen Renovation",
+    "previous_state": {
+      "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'll reach out to the contractor\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: No concerns, thanks!\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Everything looks good",
+      "all_info_collected": false,
+      "user_email": "test@example.com"
+    }
+  }
+}
+{
+  "timestamp": "2025-06-27T17:33:05.273028",
+  "turn_number": 7,
+  "turn_type": "output",
+  "data": {
+    "question": "Debug question 1 for TestUser about Kitchen Renovation",
+    "conversation_history": "Question: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned:\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'm ready to discuss my task\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: I need help with kitchen renovation\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Yes, I'll reach out to the contractor\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: No concerns, thanks!\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Everything looks good\nQuestion: Debug question 1 for TestUser about Kitchen Renovation\nLearned: Debug learned: Let's proceed",
+    "is_complete": false,
+    "completion_state": "OTHER",
+    "user_email": "test@example.com",
+    "turn_count": 1
+  }
+}
