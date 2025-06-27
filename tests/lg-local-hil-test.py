@@ -9,11 +9,21 @@ import datetime
 import os
 import asyncio
 import sys
+from pathlib import Path
+
+# Get the parent directory
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+MAX_TURNS = 7
+TEST_MODE = True
+VERBOSE = True
+#AGENT_PROMPT_TYPE = "prizm"
 
 # Import your actual agent
 try:
     # Adjust this import path to match your agent file location
-    from ../oneNodeRemMem import process_message  # Change 'your_agent_file' to actual filename
+    from neNodeRemMem import process_message  # Change 'your_agent_file' to actual filename
     AGENT_AVAILABLE = True
     print("✅ Successfully imported actual agent")
 except ImportError as e:
@@ -26,6 +36,11 @@ TEST_MODE = True
 LLM_PROVIDER = "mock" if TEST_MODE else "openai"
 USE_FIRESTORE = False  # Start with dict, switch to True later
 AGENT_PROMPT_TYPE = os.getenv("AGENT_PROMPT_TYPE", "debug")  # debug, generic, prizm
+TEST_MODE = True
+
+# Test user and task info
+TEST_USER_FIRST_NAME = "TestUser"
+TEST_TASK_NAME = "Kitchen Renovation"
 
 # Test scenarios - easy to select and run
 TEST_SCENARIOS = {
@@ -108,6 +123,8 @@ async def run_scenario(scenario_name, scenario_data):
     # Initial payload
     initial_payload = {
         "user_input": inputs[0],
+        "user_first_name": TEST_USER_FIRST_NAME,
+        "task_name": TEST_TASK_NAME,
         "previous_state": None
     }
     
@@ -141,6 +158,8 @@ async def run_scenario(scenario_name, scenario_data):
         
         next_payload = {
             "user_input": user_input,
+            "user_first_name": TEST_USER_FIRST_NAME,
+            "task_name": TEST_TASK_NAME,
             "previous_state": previous_state
         }
         
@@ -210,25 +229,44 @@ async def run_langgraph_local(payload, turn_num):
     """
     Run your actual agent or mock it based on TEST_MODE
     """
+    if VERBOSE:
+        print(f"\n🔍 VERBOSE: Input to agent (Turn {turn_num}):")
+        print("=" * 60)
+        print(f"📤 User Input: '{payload.get('user_input', '')}'")
+        print(f"👤 User First Name: '{payload.get('user_first_name', '')}'")
+        print(f"📋 Task Name: '{payload.get('task_name', '')}'")
+        print(f"📋 Previous State: {json.dumps(payload.get('previous_state', None), indent=2)}")
+        print("=" * 60)
+    
     if AGENT_AVAILABLE and not TEST_MODE:
-        # Use your real agent
+        # Use your real agent (async)
         try:
             result = await process_message(payload)
             return result
         except Exception as e:
             print(f"❌ Error running real agent: {e}")
-            # Fall back to mock
+            # Fall back to mock (synchronous)
             return run_mock_agent(payload, turn_num)
     else:
-        # Use mock agent
+        # Use mock agent (synchronous)
         return run_mock_agent(payload, turn_num)
 
 def run_mock_agent(payload, turn_num):
     """
     Mock agent that simulates your agent's behavior for testing
+    This is synchronous to keep things simple
     """
     user_input = payload.get('user_input', '')
+    user_first_name = payload.get('user_first_name', 'User')
+    task_name = payload.get('task_name', 'Task')
     previous_state = payload.get('previous_state', None)
+    
+    if VERBOSE:
+        print(f"\n🤖 VERBOSE: Mock agent processing (Turn {turn_num}):")
+        print(f"📝 User input: '{user_input}'")
+        print(f"👤 User first name: '{user_first_name}'")
+        print(f"📋 Task name: '{task_name}'")
+        print(f"📊 Previous state keys: {list(previous_state.keys()) if previous_state else 'None'}")
     
     # Initialize state like your agent does
     if previous_state is None:
@@ -243,46 +281,50 @@ def run_mock_agent(payload, turn_num):
     # Increment turn count
     turn_count += 1
     
+    if VERBOSE:
+        print(f"🔄 Turn count: {turn_count}")
+        print(f"📜 Conversation history length: {len(conversation_history)} chars")
+    
     # Mock responses based on prompt type and turn
     if AGENT_PROMPT_TYPE == "debug":
-        question = f"Debug question {turn_count}"
+        question = f"Debug question {turn_count} for {user_first_name} about {task_name}"
         learned = f"Debug learned: {user_input}"
         # Complete after 3 turns in debug mode
         is_complete = turn_count >= 3
         completion_state = "TASK_PROGRESSING" if is_complete else "OTHER"
     elif AGENT_PROMPT_TYPE == "generic":
         if turn_count == 1:
-            question = "What can I help you with today?"
+            question = f"Hello {user_first_name}, what can I help you with today regarding your {task_name}?"
             learned = "Starting conversation"
         else:
-            question = f"Thanks for that response. Anything else?"
+            question = f"Thanks for that response, {user_first_name}. Anything else about your {task_name}?"
             learned = f"User said: {user_input}"
         is_complete = turn_count >= 4
         completion_state = "TASK_COMPLETE" if is_complete else "OTHER"
     else:  # prizm mode
         if turn_count == 1:
-            question = "Hello, are you ready to discuss the home task you need assistance with?"
+            question = f"Hello {user_first_name}, are you ready to discuss the {task_name} you need assistance with?"
             learned = "No information has been provided yet."
         elif "yes" in user_input.lower() and "ready" in user_input.lower():
-            question = "Great! Will you reach out to the contractor?"
+            question = f"Great {user_first_name}! Will you reach out to the contractor for your {task_name}?"
             learned = f"User is ready to discuss task."
         elif "yes" in user_input.lower() and "contractor" in user_input.lower():
-            question = "Perfect! Do you have any concerns or questions about this task?"
+            question = f"Perfect {user_first_name}! Do you have any concerns or questions about your {task_name}?"
             learned = f"User will contact contractor."
         elif "no" in user_input.lower() and ("concern" in user_input.lower() or "question" in user_input.lower()):
-            question = "Thank you for selecting Prizm, have a great rest of your day! TASK_PROGRESSING"
+            question = f"Thank you for selecting Prizm, {user_first_name}! Have a great rest of your day! TASK_PROGRESSING"
             learned = f"User has no concerns."
             is_complete = True
             completion_state = "TASK_PROGRESSING"
         else:
-            question = f"I see. Can you tell me more about that?"
+            question = f"I see, {user_first_name}. Can you tell me more about your {task_name}?"
             learned = f"User response: {user_input}"
             is_complete = False
             completion_state = "OTHER"
     
     # Default completion logic
     if 'is_complete' not in locals():
-        is_complete = turn_count >= 7
+        is_complete = turn_count >= MAX_TURNS
         completion_state = "OTHER"
     
     # Update conversation history
@@ -298,6 +340,12 @@ def run_mock_agent(payload, turn_num):
     elif "TASK_ESCALATION" in conversation_history:
         is_complete = True
         completion_state = "TASK_ESCALATION"
+    
+    if VERBOSE:
+        print(f"🤖 Generated question: '{question}'")
+        print(f"📚 Learned: '{learned}'")
+        print(f"✅ Is complete: {is_complete}")
+        print(f"🎯 Completion state: {completion_state}")
     
     return {
         "question": question if not is_complete else "",
@@ -361,6 +409,8 @@ def main():
         # Pre-defined test conversation matching your agent's expected flow
         initial_payload = {
             "user_input": "",  # Empty for initial greeting
+            "user_first_name": TEST_USER_FIRST_NAME,
+            "task_name": TEST_TASK_NAME,
             "previous_state": None
         }
         
@@ -368,7 +418,10 @@ def main():
             "Yes, I'm ready to discuss my task",
             "I need help with kitchen renovation", 
             "Yes, I'll reach out to the contractor",
-            "No concerns, thanks!"
+            "No concerns, thanks!",
+            "Everything looks good",
+            "Let's proceed",
+            "I'm ready to move forward"
         ]
     else:
         # Manual input
@@ -377,6 +430,8 @@ def main():
         
         initial_payload = {
             "user_input": user_input,
+            "user_first_name": TEST_USER_FIRST_NAME,
+            "task_name": TEST_TASK_NAME,
             "previous_state": None
         }
         
@@ -391,7 +446,7 @@ def main():
     
     # Process initial message
     print("\n🔄 Processing turn 1...")
-    result = run_langgraph_local(initial_payload, 1)
+    result = asyncio.run(run_langgraph_local(initial_payload, 1))
     print_result_details(result, 1)
     
     # Conversation loop
@@ -402,13 +457,13 @@ def main():
         'user_email': result.get('user_email', 'test@example.com')
     }
     
-    while not result.get('is_complete', False) and turn_count < 7:
+    while not result.get('is_complete', False) and turn_count < MAX_TURNS:
         turn_count += 1
-        print(f"\n🔄 Turn {turn_count}/7")
+        print(f"\n🔄 Turn {turn_count}/{MAX_TURNS}")
         print("-" * 20)
         
         # Get user response
-        if quick_start == 'y' and len(test_inputs) >= turn_count - 1:
+        if quick_start == 'y' and turn_count - 2 < len(test_inputs):
             user_input = test_inputs[turn_count - 2]
             print(f"👤 [Auto] Your response: {user_input}")
         else:
@@ -421,14 +476,22 @@ def main():
         # Update payload for next turn (matching your agent's expected format)
         next_payload = {
             "user_input": user_input,
+            "user_first_name": TEST_USER_FIRST_NAME,
+            "task_name": TEST_TASK_NAME,
             "previous_state": previous_state
         }
+        
+        if VERBOSE:
+            print(f"\n📦 VERBOSE: Constructing payload for turn {turn_count}:")
+            print(f"   📤 User input: '{user_input}'")
+            print(f"   📋 Previous state keys: {list(previous_state.keys())}")
+            print(f"   📜 History length: {len(previous_state.get('conversation_history', ''))} chars")
         
         # Log input to file
         log_to_file(next_payload, turn_count, "input")
         
         print("🔄 Processing...")
-        result = run_langgraph_local(next_payload, turn_count)
+        result = asyncio.run(run_langgraph_local(next_payload, turn_count))
         print_result_details(result, turn_count)
         
         # Update state (matching your agent's state structure)
@@ -437,6 +500,12 @@ def main():
             'all_info_collected': False,
             'user_email': result.get('user_email', 'test@example.com')
         }
+        
+        if VERBOSE:
+            print(f"\n📊 VERBOSE: Updated state after turn {turn_count}:")
+            print(f"   📜 New history length: {len(previous_state['conversation_history'])} chars")
+            print(f"   ✅ Is complete: {result.get('is_complete', False)}")
+            print(f"   🎯 Completion state: {result.get('completion_state', 'Unknown')}")
     
     if result.get('is_complete', False):
         print("\n🏁 Conversation completed!")
