@@ -91,9 +91,23 @@ async def process_message(input_dict: Dict) -> Dict:
     Async version of process_message for LangGraph.
     """
     # Extract input values
-    user_input = input_dict.get('user_input', '')
-    previous_state = input_dict.get('previous_state', None)
-    user_email = input_dict.get('user_email', '')
+    #user_input = input_dict.get('user_input', '')
+    if isinstance(input_dict, dict):
+        user_input = input_dict.get('user_input', '')
+    else:
+        user_input = getattr(input_dict, 'user_input', '')
+
+    #previous_state = input_dict.get('previous_state', None)
+    if isinstance(input_dict, dict):
+        previous_state = input_dict.get('previous_state', None)
+    else:
+        previous_state = getattr(input_dict, 'previous_state', None)
+
+    #user_email = input_dict.get('user_email', '')
+    if isinstance(input_dict, dict):
+        user_email = input_dict.get('user_email', '')
+    else:
+        user_email = getattr(input_dict, 'user_email', '')
 
     # Initialize or restore state
     if previous_state is None:
