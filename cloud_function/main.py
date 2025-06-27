@@ -650,12 +650,22 @@ Best regards,
 Prizm Agent
             """.strip()
             
-            # Send email to the user
-            email_sent = send_email_via_gcp(user_email, email_subject, email_body)
-            if email_sent:
-                logger.info(f'📧 Email response sent successfully to {user_email}')
+            # Determine the correct email address to send to
+            if user_email == 'foilboi808@gmail.com' and task_data_firestore and task_data_firestore.get('userEmail'):
+                # For emails from foilboi808, send to the customer email stored in the task
+                recipient_email = task_data_firestore['userEmail']
+                logger.info(f'📧 Sending response to customer email: {recipient_email}')
             else:
-                logger.error(f'❌ Failed to send email response to {user_email}')
+                # For direct customer emails, send back to the same email
+                recipient_email = user_email
+                logger.info(f'📧 Sending response to user email: {recipient_email}')
+            
+            # Send email to the correct recipient
+            email_sent = send_email_via_gcp(recipient_email, email_subject, email_body)
+            if email_sent:
+                logger.info(f'📧 Email response sent successfully to {recipient_email}')
+            else:
+                logger.error(f'❌ Failed to send email response to {recipient_email}')
         else:
             logger.warning(f'⚠️ No question in result to send to {user_email}')
         

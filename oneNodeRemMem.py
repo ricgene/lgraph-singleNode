@@ -131,7 +131,8 @@ async def process_message(input_dict: Dict) -> Dict:
         state.is_complete = True
         final_message = "Thank you for your time. We've reached the maximum number of turns for this conversation."
         if state.user_email:
-            await send_email(state.user_email, "Prizm Task Conversation Complete", final_message)
+            if False:  # Disable internal email sending
+                await send_email(state.user_email, "Prizm Task Conversation Complete", final_message)
         return {
             "question": final_message,
             "conversation_history": state.conversation_history,
@@ -208,11 +209,12 @@ IMPORTANT RULES:
     if is_complete:
         question = ""
         if state.user_email and "Thank you for selecting Prizm" not in state.conversation_history:
-            await send_email(
-                state.user_email,
-                "Prizm Task Conversation Complete",
-                "Thank you for your time. We've completed our conversation about your task."
-            )
+            if False:  # Disable internal email sending
+                await send_email(
+                    state.user_email,
+                    "Prizm Task Conversation Complete",
+                    "Thank you for your time. We've completed our conversation about your task."
+                )
     elif state.user_email and question and not is_complete:
         email_body = f"""Hello!
 
@@ -225,9 +227,10 @@ Please reply to this email with your response.
 Best regards,
 Helen
 Prizm Real Estate Concierge Service"""
-        await send_email(
-            state.user_email,
-            f"Prizm Task Question",
+        if False:  # Disable internal email sending
+            await send_email(
+                state.user_email,
+                f"Prizm Task Question",
             email_body
         )
 
@@ -246,8 +249,9 @@ builder.set_entry_point("collect_info")
 
 builder.add_conditional_edges(
     "collect_info",
-    lambda state: END  # Always transition to END
+    lambda state: END if (hasattr(state, 'is_complete') and state.is_complete) or (isinstance(state, dict) and state.get('is_complete', False)) else "collect_info"
 )
+
 graph = builder.compile()
 
 __all__ = ["graph"]
