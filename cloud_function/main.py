@@ -39,7 +39,7 @@ def create_task_key(user_email, task_title, timestamp=None):
     if not timestamp:
         from datetime import datetime
         timestamp = datetime.now().isoformat()
-    return f"taskAgent1_{user_email}_{task_title}_{timestamp}"
+    return f"{user_email}_{task_title}_{timestamp}"
 
 # Helper function to create task ID
 def create_task_id(user_email, task_title, timestamp=None):
@@ -51,18 +51,17 @@ def create_task_id(user_email, task_title, timestamp=None):
 # Helper function to find existing task
 def find_existing_task(user_email, task_title):
     try:
-        task_agent_ref = db.collection('taskAgent1')
+        task_agent_ref = db.collection('conversations')
         docs = task_agent_ref.stream()
         
         for doc in docs:
             data = doc.to_dict()
-            if (data.get('currentTask') and 
-                data['currentTask'].get('userEmail') == user_email and 
-                data['currentTask'].get('taskTitle') == task_title and
-                data['currentTask'].get('status') != 'completed'):
+            if (data.get('userEmail') == user_email and 
+                data.get('taskTitle') == task_title and
+                data.get('status') != 'completed'):
                 return {
                     'taskKey': doc.id,
-                    'taskData': data['currentTask']
+                    'taskData': data
                 }
         
         return None
@@ -71,115 +70,34 @@ def find_existing_task(user_email, task_title):
         return None
 
 # Helper function to create new task
-def create_new_task(user_email, task_title):
+def create_new_task(user_email, task_title, user_first_name=None):
     from datetime import datetime
     timestamp = datetime.now().isoformat()
     task_key = create_task_key(user_email, task_title, timestamp)
     task_id = create_task_id(user_email, task_title, timestamp)
     
-    task_agent_state = {
-        'agentStateKey': task_key,
-        'currentTask': {
-            'taskId': task_id,
-            'taskTitle': task_title,
-            'userEmail': user_email,
-            'createdAt': timestamp,
-            'lastUpdated': timestamp,
-            'status': 'active',
-            'emailLock': None,
-            'lastMsgSent': None,
-            'conversationHistory': []
-        },
+    conversation_state = {
+        'taskId': task_id,
+        'taskTitle': task_title,
+        'userEmail': user_email,
+        'userFirstName': user_first_name or user_email.split('@')[0],
         'createdAt': timestamp,
-        'lastUpdated': timestamp
+        'lastUpdated': timestamp,
+        'status': 'active',
+        'conversationHistory': [],
+        'fullInputHistory': []  # Store complete input to agent each time
     }
     
-    db.collection('taskAgent1').document(task_key).set(task_agent_state)
-    logger.info(f'✅ Created new task: {task_id} with key: {task_key}')
+    db.collection('conversations').document(task_key).set(conversation_state)
+    logger.info(f'✅ Created new conversation: {task_id} with key: {task_key}')
     
     return {
         'taskKey': task_key,
-        'taskData': task_agent_state['currentTask']
+        'taskData': conversation_state
     }
-
-# Distributed locking functions
-def acquire_email_lock(customer_email, task_title):
-    # First, try to find existing task
-    existing_task = find_existing_task(customer_email, task_title)
-    task_key = None
-    task_agent_state = None
-    
-    if existing_task:
-        # Use existing task
-        task_key = existing_task['taskKey']
-        doc_ref = db.collection('taskAgent1').document(task_key)
-        doc = doc_ref.get()
-        task_agent_state = doc.to_dict()
-        logger.info(f'📋 Found existing task: {existing_task["taskData"]["taskId"]}')
-    else:
-        # Create new task
-        new_task = create_new_task(customer_email, task_title)
-        task_key = new_task['taskKey']
-        doc_ref = db.collection('taskAgent1').document(task_key)
-        doc = doc_ref.get()
-        task_agent_state = doc.to_dict()
-        logger.info(f'🆕 Created new task: {new_task["taskData"]["taskId"]}')
-    
-    # Ensure emailLock field exists for existing tasks
-    if 'emailLock' not in task_agent_state['currentTask']:
-        task_agent_state['currentTask']['emailLock'] = None
-    
-    # Wait random amount of time (0-1 second)
-    import random
-    import time
-    wait_time = random.random() * 1000
-    logger.info(f'⏳ Waiting {wait_time:.0f}ms before attempting lock acquisition')
-    time.sleep(wait_time / 1000)
-    
-    # Get last 4 digits of high-resolution timestamp
-    lock_timestamp = int(time.time() * 1000)
-    last_4_digits = str(lock_timestamp)[-4:]
-    logger.info(f'🔒 Attempting to acquire lock with digits: {last_4_digits} (timestamp: {lock_timestamp})')
-    
-    # Check if lock is already held
-    if (task_agent_state['currentTask']['emailLock'] and 
-        (time.time() * 1000 - task_agent_state['currentTask']['emailLock']['timestamp']) < 30000):
-        logger.info(f'🚫 Email lock already held for {customer_email} - {task_title}')
-        return False
-    
-    # Acquire lock
-    from datetime import datetime
-    task_agent_state['currentTask']['emailLock'] = {
-        'timestamp': datetime.now().isoformat(),
-        'lockId': last_4_digits,
-        'taskTitle': task_title
-    }
-    task_agent_state['currentTask']['lastUpdated'] = datetime.now().isoformat()
-    
-    db.collection('taskAgent1').document(task_key).set(task_agent_state)
-    logger.info(f'🔒 Successfully acquired email lock for {customer_email} - {task_title} (lock: {last_4_digits})')
-    return last_4_digits
-
-def clear_email_lock(customer_email, task_title):
-    # Find existing task
-    existing_task = find_existing_task(customer_email, task_title)
-    if not existing_task:
-        logger.info(f'⚠️ No task found to clear lock for {customer_email} - {task_title}')
-        return
-    
-    doc_ref = db.collection('taskAgent1').document(existing_task['taskKey'])
-    doc = doc_ref.get()
-    task_agent_state = doc.to_dict()
-    
-    if task_agent_state['currentTask']:
-        task_agent_state['currentTask']['emailLock'] = None
-        from datetime import datetime
-        task_agent_state['currentTask']['lastUpdated'] = datetime.now().isoformat()
-        db.collection('taskAgent1').document(existing_task['taskKey']).set(task_agent_state)
-        logger.info(f'🔓 Cleared email lock for {customer_email} - {task_title}')
 
 # LangGraph processing function
-def process_user_response(user_email, user_response, conversation_state):
+def process_user_response(user_email, user_response, conversation_state, user_first_name=None, task_title=None):
     try:
         # Import the langgraph_sdk client
         from langgraph_sdk import get_sync_client
@@ -202,9 +120,11 @@ def process_user_response(user_email, user_response, conversation_state):
             api_key=langgraph_api_key
         )
         
-        # Create input data matching the oneNodeRemMem expected format
+        # Create input data with user first name and task name included
         input_data = {
             "user_input": user_response,
+            "user_first_name": user_first_name or user_email.split('@')[0],
+            "task_name": task_title or "Task",
             "previous_state": {
                 "conversation_history": conversation_state.get("conversation_history", ""),
                 "is_complete": conversation_state.get("is_complete", False),
@@ -415,17 +335,6 @@ def process_email(request: Request):
         logger.info(f'📝 User response: {user_response}')
         logger.info(f'📋 Task title: {task_title}')
         
-        # Try to acquire email lock to prevent duplicate processing
-        lock_acquired = acquire_email_lock(user_email, task_title)
-        if not lock_acquired:
-            logger.info(f'🚫 Failed to acquire lock for {user_email} - {task_title}. Another responder is processing this email.')
-            return (json.dumps({
-                'success': False,
-                'message': 'Email already being processed by another instance'
-            }), 200, response_headers)
-        
-        logger.info(f'✅ Successfully acquired lock ({lock_acquired}) for {user_email} - {task_title}')
-        
         # Get existing task conversation using task discovery
         existing_task = find_existing_task(user_email, task_title)
         task_data = None
@@ -452,11 +361,10 @@ def process_email(request: Request):
         }
         
         # Process the user's response through LangGraph
-        result = process_user_response(user_email, user_response, temp_conversation_state)
+        result = process_user_response(user_email, user_response, temp_conversation_state, task_title=task_title)
         
         if not result:
             logger.info(f'❌ LangGraph processing failed for {user_email}')
-            clear_email_lock(user_email, task_title)
             return (json.dumps({
                 'success': False,
                 'message': 'Failed to process with LangGraph'
@@ -464,7 +372,6 @@ def process_email(request: Request):
         
         # For now, just return success without email sending
         # You can add email sending logic here later
-        clear_email_lock(user_email, task_title)
         
         return (json.dumps({
             'success': True,
@@ -557,7 +464,7 @@ Please start the conversation to help this customer with their task.
             
             # For the first call, we don't need to check for existing tasks
             # Just create a new task and start the workflow
-            new_task = create_new_task(customer_email, task_title)
+            new_task = create_new_task(customer_email, task_title, user_first_name=customer_name.split()[0] if customer_name else None)
             task_data_firestore = new_task['taskData']
             
             # Store the original structured data in the task
@@ -585,14 +492,6 @@ Please start the conversation to help this customer with their task.
             logger.info(f'📧 Processing email from: {user_email}')
             processing_email = user_email
             user_response_for_langgraph = user_response
-            
-            # Try to acquire email lock to prevent duplicate processing
-            lock_acquired = acquire_email_lock(user_email, task_title)
-            if not lock_acquired:
-                logger.info(f'🚫 Failed to acquire lock for {user_email} - {task_title}. Another responder is processing this email.')
-                return
-            
-            logger.info(f'✅ Successfully acquired lock for {user_email} - {task_title}')
             
             # Get existing task conversation using task discovery
             existing_task = find_existing_task(user_email, task_title)
@@ -625,7 +524,7 @@ Please start the conversation to help this customer with their task.
         logger.info(f'📋 Task title: {task_title}')
         
         # Process the user's response through LangGraph
-        result = process_user_response(processing_email, user_response_for_langgraph, conversation_state)
+        result = process_user_response(processing_email, user_response_for_langgraph, conversation_state, task_title=task_title)
         
         if not result:
             logger.error(f'❌ LangGraph processing failed for {processing_email}')
@@ -640,20 +539,56 @@ Please start the conversation to help this customer with their task.
             logger.info(f'📝 Using fallback response due to LangGraph failure: {json.dumps(fallback_result, indent=2)}')
             result = fallback_result
         
-        # Update task with conversation history
+        # Update task with conversation history and full input history
         if task_data_firestore:
             # Add the new conversation turn
             if 'conversationHistory' not in task_data_firestore:
                 task_data_firestore['conversationHistory'] = []
             
+            # Use current timestamp for this turn
+            from datetime import datetime
+            current_timestamp = datetime.now().isoformat()
+            
             task_data_firestore['conversationHistory'].append({
                 'userMessage': user_response_for_langgraph,
                 'agentResponse': result.get('question', ''),
-                'timestamp': timestamp or task_data_firestore.get('lastUpdated')
+                'timestamp': current_timestamp
+            })
+            
+            # Store the full input to the agent (grows each time)
+            if 'fullInputHistory' not in task_data_firestore:
+                task_data_firestore['fullInputHistory'] = []
+            
+            # Extract user first name properly
+            user_first_name = task_data_firestore.get('userFirstName')
+            if not user_first_name:
+                # Try to extract from customer name if available
+                if task_data_firestore.get('customerName'):
+                    user_first_name = task_data_firestore['customerName'].split()[0]
+                else:
+                    # Fallback to email prefix
+                    user_first_name = processing_email.split('@')[0]
+            
+            # Create the full input that was sent to the agent
+            full_input = {
+                "user_input": user_response_for_langgraph,
+                "user_first_name": user_first_name,
+                "task_name": task_title,
+                "previous_state": {
+                    "conversation_history": conversation_state.get("conversation_history", ""),
+                    "is_complete": conversation_state.get("is_complete", False),
+                    "user_email": processing_email
+                }
+            }
+            
+            task_data_firestore['fullInputHistory'].append({
+                'input': full_input,
+                'timestamp': current_timestamp,
+                'turn_number': len(task_data_firestore['fullInputHistory']) + 1
             })
             
             # Update task status
-            task_data_firestore['lastUpdated'] = timestamp or task_data_firestore.get('lastUpdated')
+            task_data_firestore['lastUpdated'] = current_timestamp
             if result.get('is_complete'):
                 task_data_firestore['status'] = 'completed'
             
@@ -664,19 +599,9 @@ Please start the conversation to help this customer with their task.
                 existing_task = find_existing_task(user_email, task_title)
                 task_key = existing_task['taskKey'] if existing_task else create_task_key(user_email, task_title)
             
-            task_agent_state = {
-                'agentStateKey': task_key,
-                'currentTask': task_data_firestore,
-                'createdAt': task_data_firestore.get('createdAt'),
-                'lastUpdated': task_data_firestore.get('lastUpdated')
-            }
-            
-            db.collection('taskAgent1').document(task_key).set(task_agent_state)
-            logger.info(f'💾 Updated task data for {processing_email}')
-        
-        # Clear lock if it was acquired
-        if user_email != 'foilboi@gmail.com':
-            clear_email_lock(user_email, task_title)
+            db.collection('conversations').document(task_key).set(task_data_firestore)
+            logger.info(f'💾 Updated conversation data for {processing_email}')
+            logger.info(f'📊 Full input history now has {len(task_data_firestore["fullInputHistory"])} entries')
         
         logger.info(f'✅ Successfully processed email from {user_email}')
         logger.info(f'📤 LangGraph result: {json.dumps(result, indent=2)}')
