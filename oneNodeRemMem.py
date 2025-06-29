@@ -65,7 +65,7 @@ IMPORTANT RULES:
 5. When you have all the information:
     - close the conversation with 'Thank you for selecting Prizm, have a great rest of your day!  And take the action below 'When you have all the information ...'
     - end with 'TASK_PROGRESSING' if user will move forward.  otherwise end with 'TASK_ESCALATION'
-6. Current turn count: {turn_count}/7. You have {7 - turn_count} turns remaining.""",
+6. Current turn count: {turn_count}/7. You have {remaining_turns} turns remaining.""",
 
     "generic": """You are a helpful AI assistant. Your goal is to understand what the user needs and provide helpful responses.
 Format your responses as:
@@ -76,7 +76,7 @@ RULES:
 1. Always use the Question/Learned format
 2. Ask follow-up questions to better understand the user's needs
 3. When you have enough information to help, end with 'TASK_COMPLETE'
-4. Current turn count: {turn_count}/7. You have {7 - turn_count} turns remaining.""",
+4. Current turn count: {turn_count}/7. You have {remaining_turns} turns remaining.""",
 
     "debug": """DEBUG MODE: Simple test agent for development.
 Format responses as:
@@ -87,7 +87,7 @@ RULES:
 1. Keep responses short and simple
 2. Always use Question/Learned format
 3. End with 'TASK_PROGRESSING' after 3 turns for testing
-4. Current turn count: {turn_count}/7. You have {7 - turn_count} turns remaining."""
+4. Current turn count: {turn_count}/7. You have {remaining_turns} turns remaining."""
 }
 
 def test_api_key():
@@ -107,7 +107,8 @@ def get_system_prompt(turn_count: int) -> str:
         prompt_type = "prizm"
     
     logger.info(f"Using prompt type: {prompt_type}")
-    return SYSTEM_PROMPTS[prompt_type].format(turn_count=turn_count)
+    remaining_turns = 7 - turn_count
+    return SYSTEM_PROMPTS[prompt_type].format(turn_count=turn_count, remaining_turns=remaining_turns)
 
 test_api_key()
 
