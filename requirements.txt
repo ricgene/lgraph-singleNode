@@ -12,5 +12,7 @@ vertexai==0.0.1
 requests>=2.25.0
 flask>=2.0.0
 flask-cors>=3.0.0
+# SMS/Twilio integration
+twilio>=8.0.0
 # Email functionality calls deployed GCP email function
 # Flask server exposes LangGraph functions for email integration
