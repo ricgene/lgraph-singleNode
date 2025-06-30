@@ -95,4 +95,7 @@ email_watcher_function/fbserviceAccountKey-admin.json
 tests-new/results/
 *.log
 trace_report_*.json
-observable_test.log* 
+observable_test.log*
+
+# Cleanup directories
+cleanup_*/ 
