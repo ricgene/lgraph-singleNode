@@ -89,4 +89,10 @@ jspm_packages/
 conversation_states.json 
 
 # Email watcher function
-email_watcher_function/fbserviceAccountKey-admin.json 
+email_watcher_function/fbserviceAccountKey-admin.json
+
+# Test results and logs
+tests-new/results/
+*.log
+trace_report_*.json
+observable_test.log* 
