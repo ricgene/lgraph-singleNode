@@ -16,6 +16,7 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from observability import get_logger
+from messagecentral_sms import MessageCentralSMS
 
 # Load environment variables
 load_dotenv()
@@ -25,6 +26,7 @@ TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN', '')
 TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER', '')
 USE_MOCK_TWILIO = os.getenv('USE_MOCK_TWILIO', 'true').lower() == 'true'
+USE_MESSAGECENTRAL = os.getenv('USE_MESSAGECENTRAL', 'false').lower() == 'true'
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -32,13 +34,18 @@ app = Flask(__name__)
 # Initialize observability
 logger = get_logger("sms_webhook", "sms_webhook.log")
 
-# Initialize Twilio client
-if not USE_MOCK_TWILIO and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+# Initialize SMS clients
+twilio_client = None
+messagecentral_client = None
+
+if USE_MESSAGECENTRAL:
+    messagecentral_client = MessageCentralSMS()
+    logger.logger.info("📱 Using MessageCentral SMS")
+elif not USE_MOCK_TWILIO and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     logger.logger.info("🔧 Using real Twilio client")
 else:
-    twilio_client = None
-    logger.logger.info("🔮 Using mock Twilio for testing")
+    logger.logger.info("🔮 Using mock SMS for testing")
 
 # Mock SMS database for testing
 mock_sms_data = {}
@@ -96,29 +103,50 @@ class MockTwilioSMS:
         return {"sid": f"mock_sid_{len(mock_sms_data)}", "status": "sent"}
 
 def send_sms_response(to_number: str, message: str):
-    """Send SMS response via Twilio or mock"""
+    """Send SMS response via MessageCentral, Twilio, or mock"""
     
-    if USE_MOCK_TWILIO or not twilio_client:
-        return MockTwilioSMS.send_sms(to_number, message)
+    # Try MessageCentral first if enabled
+    if USE_MESSAGECENTRAL and messagecentral_client:
+        try:
+            with logger.trace_operation("messagecentral_sms_send", {
+                "to_number": to_number,
+                "message_length": len(message)
+            }):
+                result = messagecentral_client.send_sms(to_number, message)
+                
+                if result["status"] == "sent":
+                    logger.logger.info(f"📤 MessageCentral SMS sent to {to_number} | ID: {result['sid']}")
+                    return result
+                else:
+                    logger.logger.error(f"❌ MessageCentral SMS failed: {result.get('error', 'Unknown error')}")
+                    # Fall through to other methods
+                    
+        except Exception as e:
+            logger.logger.error(f"❌ MessageCentral SMS error: {str(e)}")
+            # Fall through to other methods
     
-    try:
-        with logger.trace_operation("twilio_sms_send", {
-            "to_number": to_number,
-            "message_length": len(message)
-        }):
-            message_obj = twilio_client.messages.create(
-                body=message,
-                from_=TWILIO_PHONE_NUMBER,
-                to=to_number
-            )
-            
-            logger.logger.info(f"📤 SMS sent to {to_number} | SID: {message_obj.sid}")
-            return {"sid": message_obj.sid, "status": message_obj.status}
-            
-    except Exception as e:
-        logger.logger.error(f"❌ SMS send failed: {str(e)}")
-        # Fallback to mock for testing
-        return MockTwilioSMS.send_sms(to_number, message)
+    # Try Twilio if available
+    if not USE_MOCK_TWILIO and twilio_client:
+        try:
+            with logger.trace_operation("twilio_sms_send", {
+                "to_number": to_number,
+                "message_length": len(message)
+            }):
+                message_obj = twilio_client.messages.create(
+                    body=message,
+                    from_=TWILIO_PHONE_NUMBER,
+                    to=to_number
+                )
+                
+                logger.logger.info(f"📤 Twilio SMS sent to {to_number} | SID: {message_obj.sid}")
+                return {"sid": message_obj.sid, "status": message_obj.status}
+                
+        except Exception as e:
+            logger.logger.error(f"❌ Twilio SMS send failed: {str(e)}")
+            # Fall through to mock
+    
+    # Fallback to mock SMS
+    return MockTwilioSMS.send_sms(to_number, message)
 
 # Initialize conversation loop
 sms_loop = SMSConversationLoop()
@@ -241,6 +269,8 @@ def sms_status():
     
     return jsonify({
         "status": "running",
+        "sms_provider": "messagecentral" if USE_MESSAGECENTRAL else ("twilio" if twilio_client else "mock"),
+        "messagecentral_enabled": USE_MESSAGECENTRAL,
         "twilio_configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN),
         "mock_mode": USE_MOCK_TWILIO,
         "phone_number": TWILIO_PHONE_NUMBER,
@@ -263,6 +293,7 @@ def health_check():
 
 if __name__ == '__main__':
     logger.logger.info("🚀 Starting SMS Webhook Server")
+    logger.logger.info(f"📱 MessageCentral enabled: {USE_MESSAGECENTRAL}")
     logger.logger.info(f"🔧 Twilio configured: {bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN)}")
     logger.logger.info(f"🔮 Mock mode: {USE_MOCK_TWILIO}")
     logger.logger.info(f"📱 Phone number: {TWILIO_PHONE_NUMBER}")
