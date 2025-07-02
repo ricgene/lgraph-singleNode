@@ -1,0 +1,19 @@
+{
+  "allowedTools": [],
+  "history": [
+  ],
+  "dontCrawlDirectory": false,
+  "mcpContextUris": [],
+  "enableAllProjectMcpServers": true,
+  "hasTrustDialogAccepted": true,
+  "ignorePatterns": [
+    "node_modules",
+    ".git",
+    "*.log",
+    "build",
+    "dist"
+  ],
+  "projectSpecificSettings": {
+    "description": "LGraph Single Node project from May 2016"
+  }
+}
