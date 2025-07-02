@@ -224,10 +224,12 @@ async def process_message(input_dict: Dict) -> Dict:
 builder = StateGraph(dict)
 builder.add_node("collect_info", process_message)
 builder.set_entry_point("collect_info")
-builder.add_conditional_edges(
-    "collect_info",
-    lambda state: END if state.get('is_complete', False) else "collect_info"
-)
+builder.add_edge("collect_info", END)
+# this is the old way to do it  
+# builder.add_conditional_edges(
+#     "collect_info",
+#     lambda state: END if state.get('is_complete', False) else "collect_info"
+# )
 graph = builder.compile()
 
 __all__ = ["graph"]

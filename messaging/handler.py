@@ -132,9 +132,17 @@ class UnifiedMessageHandler:
             
             # Call the LangGraph agent using SDK
             # Using 'moBettah' from your langgraph.json
-            result = self.langgraph_client.runs.invoke(
-                "moBettah",
+            thread = self.langgraph_client.threads.create()
+            run = self.langgraph_client.runs.create(
+                thread_id=thread["thread_id"],
+                assistant_id="moBettah",
                 input=langgraph_input
+            )
+            
+            # Wait for completion and get result
+            result = self.langgraph_client.runs.wait(
+                thread_id=thread["thread_id"],
+                run_id=run["run_id"]
             )
             
             # Extract response from LangGraph result
