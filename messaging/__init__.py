@@ -17,6 +17,7 @@ from .base import (
 from .telegram_provider import TelegramProvider
 from .twilio_provider import TwilioProvider
 from .messagecentral_provider import MessageCentralProvider
+from .handler import message_handler
 
 __all__ = [
     'MessageProvider',
@@ -27,6 +28,7 @@ __all__ = [
     'MessageProviderBase',
     'MessageManager',
     'message_manager',
+    'message_handler',
     'TelegramProvider',
     'TwilioProvider',
     'MessageCentralProvider'

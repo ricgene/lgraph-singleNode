@@ -7,7 +7,6 @@ import os
 import sys
 import json
 import logging
-import requests
 from datetime import datetime
 from typing import Dict, Optional, Any
 
@@ -32,6 +31,18 @@ class UnifiedMessageHandler:
     def __init__(self):
         self.langgraph_url = os.getenv('LANGGRAPH_DEPLOYMENT_URL')
         self.langgraph_key = os.getenv('LANGGRAPH_API_KEY')
+        self.langgraph_client = None
+        
+        # Initialize LangGraph client if credentials are available
+        if self.langgraph_url and self.langgraph_key:
+            try:
+                from langgraph_sdk import get_client
+                self.langgraph_client = get_client(url=self.langgraph_url, api_key=self.langgraph_key)
+                logger.info("LangGraph SDK client initialized")
+            except ImportError:
+                logger.error("langgraph_sdk not installed")
+            except Exception as e:
+                logger.error(f"Failed to initialize LangGraph client: {str(e)}")
         
     def process_message(self, incoming_message: IncomingMessage) -> MessageResult:
         """Process an incoming message and send response"""
@@ -97,13 +108,17 @@ class UnifiedMessageHandler:
             return "Unknown command. Send HELP to see available commands, or just send me a regular message."
     
     def _process_with_langgraph(self, message: IncomingMessage) -> str:
-        """Process user input through LangGraph agent"""
+        """Process user input through LangGraph agent using SDK"""
         try:
+            if not self.langgraph_client:
+                logger.error("LangGraph client not initialized")
+                return "Bot configuration error. Please contact support."
+            
             # Create unique user identifier
             user_identifier = f"{message.provider.value}_{message.user_id}"
             
-            # Prepare the request payload for LangGraph
-            payload = {
+            # Prepare the input for LangGraph (based on your oneNodeRemMem.py structure)
+            langgraph_input = {
                 "user_input": message.text,
                 "user_email": f"{user_identifier}@{message.provider.value}.local",
                 "task_json": {
@@ -112,35 +127,30 @@ class UnifiedMessageHandler:
                     "description": f"{message.provider.value.title()}-based conversation with LangGraph agent",
                     "category": "Communication"
                 },
-                "previous_state": None  # Will be handled by LangGraph's state management
+                "previous_state": None
             }
             
-            # Call the LangGraph agent
-            if self.langgraph_url and self.langgraph_key:
-                headers = {
-                    'Authorization': f'Bearer {self.langgraph_key}',
-                    'Content-Type': 'application/json'
-                }
-                
-                response = requests.post(
-                    self.langgraph_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=30
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    return result.get('response', 'I processed your message but had trouble generating a response.')
-                else:
-                    logger.error(f"LangGraph API error: {response.status_code} - {response.text}")
-                    return "I'm having trouble processing your request right now. Please try again later."
+            # Call the LangGraph agent using SDK
+            # Using 'moBettah' from your langgraph.json
+            result = self.langgraph_client.runs.invoke(
+                "moBettah",
+                input=langgraph_input
+            )
+            
+            # Extract response from LangGraph result
+            if result and isinstance(result, dict):
+                # Try different possible response keys
+                response_text = (result.get('response') or 
+                               result.get('output') or 
+                               result.get('answer') or
+                               str(result))
+                return response_text
             else:
-                logger.error("LangGraph configuration missing")
-                return "Bot configuration error. Please contact support."
+                logger.error(f"Unexpected LangGraph result format: {result}")
+                return "I processed your message but had trouble generating a response."
                 
         except Exception as e:
-            logger.error(f"Error processing with LangGraph: {str(e)}")
+            logger.error(f"Error processing with LangGraph SDK: {str(e)}")
             return "I encountered an error processing your message. Please try again."
 
 # Global handler instance
