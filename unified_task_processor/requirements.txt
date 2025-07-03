@@ -1,0 +1,6 @@
+functions-framework==3.*
+requests>=2.31.0
+langgraph_sdk>=0.1.72
+firebase-admin>=6.0.0
+python-dotenv>=1.0.0
+twilio>=8.0.0
