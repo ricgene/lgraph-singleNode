@@ -49,41 +49,118 @@ def initialize_providers():
     """Initialize all messaging providers"""
     providers_initialized = []
     
-    # Initialize Telegram provider
-    telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    if telegram_token:
-        telegram_provider = TelegramProvider({'bot_token': telegram_token})
-        message_manager.register_provider(telegram_provider)
-        providers_initialized.append('Telegram')
-    
-    # Initialize Twilio provider
-    twilio_sid = os.getenv('TWILIO_ACCOUNT_SID')
-    twilio_token = os.getenv('TWILIO_AUTH_TOKEN')
-    if twilio_sid and twilio_token:
-        twilio_provider = TwilioProvider({
-            'account_sid': twilio_sid,
-            'auth_token': twilio_token,
-            'phone_number': os.getenv('TWILIO_PHONE_NUMBER')
-        })
-        message_manager.register_provider(twilio_provider)
-        providers_initialized.append('Twilio')
-    
-    # Initialize MessageCentral provider
-    mc_customer_id = os.getenv('MC_CUSTOMER_ID')
-    if mc_customer_id:
-        mc_provider = MessageCentralProvider({
-            'customer_id': mc_customer_id,
-            'password': os.getenv('MC_PASSWORD'),
-            'password_base64': os.getenv('MC_PASSWORD_BASE64')
-        })
-        message_manager.register_provider(mc_provider)
-        providers_initialized.append('MessageCentral')
-    
-    logger.info(f"Initialized messaging providers: {providers_initialized}")
-    return providers_initialized
+    try:
+        logger.info("Starting provider initialization...")
+        
+        # Initialize Telegram provider
+        telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        logger.info(f"Telegram token available: {bool(telegram_token)}")
+        
+        if telegram_token:
+            try:
+                telegram_provider = TelegramProvider({'bot_token': telegram_token})
+                message_manager.register_provider(telegram_provider)
+                providers_initialized.append('Telegram')
+                logger.info("✅ Telegram provider initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Telegram provider: {str(e)}")
+        else:
+            logger.warning("⚠️ TELEGRAM_BOT_TOKEN not found")
+        
+        # Initialize Twilio provider
+        twilio_sid = os.getenv('TWILIO_ACCOUNT_SID')
+        twilio_token = os.getenv('TWILIO_AUTH_TOKEN')
+        logger.info(f"Twilio credentials available: {bool(twilio_sid and twilio_token)}")
+        
+        if twilio_sid and twilio_token:
+            try:
+                twilio_provider = TwilioProvider({
+                    'account_sid': twilio_sid,
+                    'auth_token': twilio_token,
+                    'phone_number': os.getenv('TWILIO_PHONE_NUMBER')
+                })
+                message_manager.register_provider(twilio_provider)
+                providers_initialized.append('Twilio')
+                logger.info("✅ Twilio provider initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Twilio provider: {str(e)}")
+        
+        # Initialize MessageCentral provider
+        mc_customer_id = os.getenv('MC_CUSTOMER_ID')
+        logger.info(f"MessageCentral credentials available: {bool(mc_customer_id)}")
+        
+        if mc_customer_id:
+            try:
+                mc_provider = MessageCentralProvider({
+                    'customer_id': mc_customer_id,
+                    'password': os.getenv('MC_PASSWORD'),
+                    'password_base64': os.getenv('MC_PASSWORD_BASE64')
+                })
+                message_manager.register_provider(mc_provider)
+                providers_initialized.append('MessageCentral')
+                logger.info("✅ MessageCentral provider initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize MessageCentral provider: {str(e)}")
+        
+        logger.info(f"🎉 Provider initialization complete. Initialized: {providers_initialized}")
+        return providers_initialized
+        
+    except Exception as e:
+        logger.error(f"❌ Critical error during provider initialization: {str(e)}")
+        return []
 
 # Initialize providers on startup
-initialize_providers()
+logger.info("🚀 Starting unified task processor...")
+try:
+    initialized_providers = initialize_providers()
+    logger.info(f"📊 Available providers: {[p.value for p in message_manager.providers.keys()]}")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize providers: {str(e)}")
+
+def store_telegram_user_mapping(username: str, chat_id: str, user_data: dict = None):
+    """Store mapping between Telegram username and chat_id in Firestore"""
+    try:
+        # Clean username (remove @ if present)
+        clean_username = username.lstrip('@').lower()
+        
+        mapping_data = {
+            'username': clean_username,
+            'chat_id': str(chat_id),
+            'last_seen': datetime.now().isoformat(),
+            'user_data': user_data or {}
+        }
+        
+        doc_ref = db.collection('telegram_users').document(clean_username)
+        doc_ref.set(mapping_data, merge=True)
+        
+        logger.info(f"Stored Telegram mapping: {clean_username} -> {chat_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error storing Telegram user mapping: {str(e)}")
+        return False
+
+def lookup_telegram_chat_id(username: str) -> Optional[str]:
+    """Look up chat_id for a Telegram username"""
+    try:
+        # Clean username (remove @ if present)
+        clean_username = username.lstrip('@').lower()
+        
+        doc_ref = db.collection('telegram_users').document(clean_username)
+        doc = doc_ref.get()
+        
+        if doc.exists:
+            data = doc.to_dict()
+            chat_id = data.get('chat_id')
+            logger.info(f"Found Telegram mapping: {clean_username} -> {chat_id}")
+            return chat_id
+        else:
+            logger.warning(f"No Telegram mapping found for username: {clean_username}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error looking up Telegram chat_id: {str(e)}")
+        return None
 
 def determine_messaging_channel(phone_number: str) -> tuple[MessageProvider, str]:
     """
@@ -177,9 +254,39 @@ def initiate_conversation(task_record: Dict[str, Any]) -> Dict[str, Any]:
                    f"Let's get started with a few questions to better understand your needs.")
         
         # Send initial message
+        # For Telegram handles starting with @, lookup the chat_id
+        if provider_type == MessageProvider.TELEGRAM and contact_id.startswith('@'):
+            # Look up the chat_id for this username
+            actual_chat_id = lookup_telegram_chat_id(contact_id)
+            
+            if not actual_chat_id:
+                # No mapping found - store task but can't send message yet
+                logger.warning(f"No chat_id found for Telegram username: {contact_id}")
+                greeting += f"\n\nNote: To receive messages, please send '/start' to @Aloha116bot on Telegram to establish the connection."
+                
+                # Update task record to indicate waiting for user to message bot
+                task_record['conversation_state']['waiting_for_telegram_init'] = True
+                doc_ref = db.collection('tasks').document(task_record['task_id'])
+                doc_ref.update({
+                    'conversation_state': task_record['conversation_state'],
+                    'telegram_username': contact_id,
+                    'waiting_for_user_init': True
+                })
+                
+                return {
+                    'success': True,
+                    'task_id': task_record['task_id'],
+                    'provider': provider_type.value,
+                    'contact_id': contact_id,
+                    'message_sent': False,
+                    'note': f"Task created. User needs to message @Aloha116bot to start conversation."
+                }
+        else:
+            actual_chat_id = contact_id
+        
         outgoing_message = OutgoingMessage(
             text=greeting,
-            chat_id=contact_id
+            chat_id=actual_chat_id
         )
         
         result = message_manager.send_message(outgoing_message, provider_type)
