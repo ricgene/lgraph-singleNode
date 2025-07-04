@@ -74,6 +74,11 @@ class TelegramProvider(MessageProviderBase):
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"Telegram API request failed: {str(e)}")
+            logger.error(f"Request URL: {url}")
+            logger.error(f"Request payload: {payload}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response text: {e.response.text}")
             return MessageResult(
                 success=False,
                 error=f"API request failed: {str(e)}"
