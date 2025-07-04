@@ -167,10 +167,24 @@ async function processEmail(imap, stream, info) {
       return;
     }
 
-    // Skip emails from our own address
+    // Skip system-generated emails but allow task creation emails from same account
     if (from === GMAIL_USER) {
-      console.log('🚫 Skipping email from our own address:', from);
-      return;
+      // Check if this is a system-generated email (like responses we sent)
+      const isSystemEmail = subject && (
+        subject.toLowerCase().includes('re:') || 
+        subject.toLowerCase().includes('response') ||
+        subject.toLowerCase().includes('reply') ||
+        text.includes('I\'m your AI assistant') ||
+        text.includes('LangGraph') ||
+        text.includes('conversation')
+      );
+      
+      if (isSystemEmail) {
+        console.log('🚫 Skipping system-generated email from our own address:', from, 'Subject:', subject);
+        return;
+      } else {
+        console.log('✅ Processing task email from monitored account:', from, 'Subject:', subject);
+      }
     }
 
     console.log(`📧 Processing email from: ${from}`);
