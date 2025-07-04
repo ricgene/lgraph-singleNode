@@ -334,17 +334,42 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
         }
         
         try {
-          // Publish message to Pub/Sub
-          const messageData = {
-            userEmail: userEmail,
-            userResponse: userResponse,
-            emailUid: emailUid,
-            timestamp: new Date().toISOString()
-          };
+          // Check if this is a task creation email (contains task data)
+          const isTaskCreationEmail = checkIfTaskCreationEmail(parsed);
           
-          const messageBuffer = Buffer.from(JSON.stringify(messageData));
-          const messageId = await pubsub.topic(topicName).publish(messageBuffer);
-          console.log(`✅ Message ${messageId} published to topic ${topicName}.`);
+          if (isTaskCreationEmail) {
+            console.log('📋 Detected task creation email - processing via unified task processor');
+            
+            // Extract task data from email
+            const taskData = extractTaskDataFromEmail(parsed, userEmail);
+            
+            // Call unified task processor
+            const taskProcessorUrl = process.env.UNIFIED_TASK_PROCESSOR_URL || 'https://unified-task-processor-cs64iuly6q-uc.a.run.app';
+            
+            const response = await axios.post(taskProcessorUrl, taskData, {
+              headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (response.status === 200) {
+              console.log('✅ Task created successfully via unified processor:', response.data);
+            } else {
+              console.error('❌ Failed to create task via unified processor:', response.status, response.data);
+            }
+          } else {
+            // Legacy: Publish message to Pub/Sub for conversation replies
+            console.log('💬 Processing as conversation reply via Pub/Sub');
+            
+            const messageData = {
+              userEmail: userEmail,
+              userResponse: userResponse,
+              emailUid: emailUid,
+              timestamp: new Date().toISOString()
+            };
+            
+            const messageBuffer = Buffer.from(JSON.stringify(messageData));
+            const messageId = await pubsub.topic(topicName).publish(messageBuffer);
+            console.log(`✅ Message ${messageId} published to topic ${topicName}.`);
+          }
           
           // Mark as processed
           processedEmails.add(emailUid);
@@ -355,17 +380,35 @@ function processEmailsInFolder(results, folderName, imap, processedEmails) {
           console.log('Processed email reply for:', userEmail);
           console.log('Total processed emails:', processingEmails.size);
           
-          // Mark email as processed by adding the "processed" label
+          // Delete email after successful processing to prevent duplicates
           if (msg.attributes && msg.attributes.uid) {
-            imap.addFlags(msg.attributes.uid, 'processed', (err) => {
+            // First mark as deleted
+            imap.addFlags(msg.attributes.uid, '\\Deleted', (err) => {
               if (err) {
-                console.error('❌ Failed to add processed label to email:', err);
+                console.error('❌ Failed to mark email for deletion:', err);
+                // Fallback: add processed label if deletion fails
+                imap.addFlags(msg.attributes.uid, 'processed', (fallbackErr) => {
+                  if (fallbackErr) {
+                    console.error('❌ Failed to add processed label as fallback:', fallbackErr);
+                  } else {
+                    console.log('✅ Added processed label as fallback for UID:', msg.attributes.uid);
+                  }
+                });
               } else {
-                console.log('✅ Added processed label to email UID:', msg.attributes.uid);
+                console.log('✅ Marked email for deletion - UID:', msg.attributes.uid);
+                
+                // Then expunge (permanently delete) the email
+                imap.expunge((expungeErr) => {
+                  if (expungeErr) {
+                    console.error('❌ Failed to expunge deleted email:', expungeErr);
+                  } else {
+                    console.log('🗑️ Successfully deleted email UID:', msg.attributes.uid);
+                  }
+                });
               }
             });
           } else {
-            console.log('⚠️ Could not add processed label (no UID available) - using message ID tracking instead');
+            console.log('⚠️ Could not delete email (no UID available) - using message ID tracking instead');
             // Fallback: track by message ID in our processed emails set
             if (parsed.messageId) {
               processedEmails.add(parsed.messageId);
@@ -475,6 +518,91 @@ async function main() {
     console.error('Error in main:', error);
     process.exit(1);
   }
+}
+
+// Helper functions for task creation email detection
+function checkIfTaskCreationEmail(parsed) {
+  // Check if email contains task-related keywords in subject or body
+  const subject = parsed.subject?.toLowerCase() || '';
+  const text = parsed.text?.toLowerCase() || '';
+  const html = parsed.html?.toLowerCase() || '';
+  
+  // Keywords that indicate a task creation email
+  const taskKeywords = [
+    'new task',
+    'task creation',
+    'customer name',
+    'task budget',
+    'due date',
+    'full address',
+    'category',
+    'vendors'
+  ];
+  
+  // Check if email contains task creation indicators
+  const emailContent = `${subject} ${text} ${html}`;
+  
+  return taskKeywords.some(keyword => emailContent.includes(keyword)) ||
+         // Check for structured task data patterns
+         emailContent.includes('customer name:') ||
+         emailContent.includes('task:') ||
+         emailContent.includes('budget:') ||
+         emailContent.includes('address:');
+}
+
+function extractTaskDataFromEmail(parsed, userEmail) {
+  // Extract task data from email content
+  const text = parsed.text || '';
+  const html = parsed.html || '';
+  const content = text || html;
+  
+  // Initialize task data structure
+  const taskData = {
+    custemail: userEmail,
+    source: 'email',
+    emailSubject: parsed.subject,
+    emailDate: parsed.date,
+    rawContent: content
+  };
+  
+  // Extract common task fields using regex patterns
+  const patterns = {
+    'Customer Name': /customer\s*name\s*:?\s*([^\n\r]+)/i,
+    'Task': /task\s*:?\s*([^\n\r]+)/i,
+    'Task Budget': /(?:task\s*)?budget\s*:?\s*([^\n\r]+)/i,
+    'Category': /category\s*:?\s*([^\n\r]+)/i,
+    'DueDate': /due\s*date\s*:?\s*([^\n\r]+)/i,
+    'Posted': /posted\s*:?\s*([^\n\r]+)/i,
+    'FullAddress': /(?:full\s*)?address\s*:?\s*([^\n\r]+)/i,
+    'Full Address': /full\s*address\s*:?\s*([^\n\r]+)/i,
+    'State': /state\s*:?\s*([^\n\r]+)/i,
+    'Phone': /phone\s*(?:number)?\s*:?\s*([^\n\r]+)/i,
+    'vendors': /vendors?\s*:?\s*([^\n\r]+)/i
+  };
+  
+  // Extract data using patterns
+  for (const [field, pattern] of Object.entries(patterns)) {
+    const match = content.match(pattern);
+    if (match && match[1]) {
+      taskData[field] = match[1].trim();
+    }
+  }
+  
+  // Set default values if not found
+  if (!taskData['Customer Name']) {
+    taskData['Customer Name'] = userEmail.split('@')[0]; // Use email prefix as fallback
+  }
+  
+  if (!taskData['Task']) {
+    taskData['Task'] = parsed.subject || 'Email Task';
+  }
+  
+  // Set description from email content
+  taskData.description = content.substring(0, 500); // First 500 chars as description
+  
+  console.log('Extracted task data:', JSON.stringify(taskData, null, 2));
+  
+  return taskData;
 }
 
 // Start the application
