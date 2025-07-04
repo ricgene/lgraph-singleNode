@@ -192,10 +192,12 @@ def determine_messaging_channel(phone_number: str) -> tuple[MessageProvider, str
 def create_task_record(task_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a task record in Firestore"""
     try:
-        # Extract key fields
-        customer_name = task_data.get('Customer Name', '')
+        # Extract key fields - handle both front-end and email formats
+        customer_name = task_data.get('Customer Name', task_data.get('customerName', ''))
         customer_email = task_data.get('custemail', '')
-        phone_number = task_data.get('phone_number', task_data.get('Phone', ''))
+        phone_number = (task_data.get('phone_number') or 
+                       task_data.get('phone') or 
+                       task_data.get('Phone', ''))
         task_title = task_data.get('Task', 'General Task')
         description = task_data.get('description', '')
         
@@ -218,8 +220,11 @@ def create_task_record(task_data: Dict[str, Any]) -> Dict[str, Any]:
             'description': description,
             'category': task_data.get('Category', 'General'),
             'budget': task_data.get('Task Budget', 0),
-            'address': task_data.get('Full Address', ''),
+            'address': task_data.get('FullAddress', task_data.get('Full Address', '')),
             'state': task_data.get('State', ''),
+            'due_date': task_data.get('DueDate', ''),
+            'posted_date': task_data.get('Posted', ''),
+            'vendors': task_data.get('vendors', ''),
             'created_at': timestamp,
             'conversation_state': {
                 'turn_count': 0,
@@ -346,21 +351,19 @@ def process_task(request: Request):
         
         logger.info(f"Received task data: {json.dumps(task_data, indent=2)}")
         
-        # Validate required fields
-        required_fields = ['Customer Name', 'custemail']
-        missing_fields = [field for field in required_fields if not task_data.get(field)]
-        
-        if missing_fields:
-            return {"error": f"Missing required fields: {missing_fields}"}, 400
+        # Validate required fields - handle both formats
+        customer_email = task_data.get('custemail', '')
+        if not customer_email:
+            return {"error": "Missing required field: custemail"}, 400
         
         # Check for phone number in various possible fields
         phone_number = (task_data.get('phone_number') or 
-                       task_data.get('Phone') or 
                        task_data.get('phone') or 
+                       task_data.get('Phone') or 
                        task_data.get('phoneNumber'))
         
         if not phone_number:
-            return {"error": "Phone number is required for messaging"}, 400
+            return {"error": "Phone number/contact is required for messaging"}, 400
         
         task_data['phone_number'] = phone_number  # Normalize field name
         

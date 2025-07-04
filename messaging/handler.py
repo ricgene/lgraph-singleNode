@@ -36,9 +36,9 @@ class UnifiedMessageHandler:
         # Initialize LangGraph client if credentials are available
         if self.langgraph_url and self.langgraph_key:
             try:
-                from langgraph_sdk import get_client
-                self.langgraph_client = get_client(url=self.langgraph_url, api_key=self.langgraph_key)
-                logger.info("LangGraph SDK client initialized")
+                from langgraph_sdk import get_sync_client
+                self.langgraph_client = get_sync_client(url=self.langgraph_url, api_key=self.langgraph_key)
+                logger.info("LangGraph sync client initialized")
             except ImportError:
                 logger.error("langgraph_sdk not installed")
             except Exception as e:
@@ -110,52 +110,18 @@ class UnifiedMessageHandler:
     def _process_with_langgraph(self, message: IncomingMessage) -> str:
         """Process user input through LangGraph agent using SDK"""
         try:
-            if not self.langgraph_client:
-                logger.error("LangGraph client not initialized")
-                return "Bot configuration error. Please contact support."
+            # For now, return a simple response while we debug the SDK
+            # TODO: Replace with working LangGraph SDK pattern
             
-            # Create unique user identifier
-            user_identifier = f"{message.provider.value}_{message.user_id}"
+            logger.info(f"Processing message: {message.text}")
             
-            # Prepare the input for LangGraph (based on your oneNodeRemMem.py structure)
-            langgraph_input = {
-                "user_input": message.text,
-                "user_email": f"{user_identifier}@{message.provider.value}.local",
-                "task_json": {
-                    "taskTitle": f"{message.provider.value.title()} Conversation",
-                    "taskId": f"{message.provider.value}_{message.chat_id}_{datetime.now().isoformat()}",
-                    "description": f"{message.provider.value.title()}-based conversation with LangGraph agent",
-                    "category": "Communication"
-                },
-                "previous_state": None
-            }
-            
-            # Call the LangGraph agent using SDK
-            # Using 'moBettah' from your langgraph.json
-            thread = self.langgraph_client.threads.create()
-            run = self.langgraph_client.runs.create(
-                thread_id=thread["thread_id"],
-                assistant_id="moBettah",
-                input=langgraph_input
-            )
-            
-            # Wait for completion and get result
-            result = self.langgraph_client.runs.wait(
-                thread_id=thread["thread_id"],
-                run_id=run["run_id"]
-            )
-            
-            # Extract response from LangGraph result
-            if result and isinstance(result, dict):
-                # Try different possible response keys
-                response_text = (result.get('response') or 
-                               result.get('output') or 
-                               result.get('answer') or
-                               str(result))
-                return response_text
+            # Simple response for testing
+            if "hello" in message.text.lower():
+                return "Hello! I'm your AI assistant. I'm currently being configured to use LangGraph. How can I help you today?"
+            elif "test" in message.text.lower():
+                return "Test message received! The Telegram integration is working. LangGraph processing is being debugged."
             else:
-                logger.error(f"Unexpected LangGraph result format: {result}")
-                return "I processed your message but had trouble generating a response."
+                return f"I received your message: '{message.text}'. I'm currently being configured to provide AI-powered responses through LangGraph."
                 
         except Exception as e:
             logger.error(f"Error processing with LangGraph SDK: {str(e)}")
