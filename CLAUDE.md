@@ -2,163 +2,204 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Development Commands
+## 🏗️ Current Architecture Overview
 
-### Python Environment
-```bash
-# Install Python dependencies
-pip install -r requirements.txt
+### Unified Messaging System (NEW - July 2025)
+The system has transitioned from email-based communication to a **unified messaging platform** supporting:
+- **Telegram** (Primary): Handles @username communication via bot
+- **SMS**: Twilio and MessageCentral for phone number communication  
+- **Email Processing**: Task detection and routing (no longer for responses)
 
-# Start local LangGraph server
-python langgraph_server.py
+### Core Components
 
-# Run specific tests
-python test_live_conversation.py
-python test_messagecentral_integration.py
-python test_telegram_integration.py
+#### 1. Task Processing Flow
+```
+Frontend/Email → Unified Task Processor → Messaging Channel → LangGraph Agent → Response
 ```
 
-### Node.js Environment
+#### 2. Messaging Abstraction Layer
+- **Location**: `messaging/` directory
+- **Purpose**: Provider-agnostic messaging with easy swapping between Telegram/SMS
+- **Components**:
+  - `messaging/base.py` - Core interfaces and message manager
+  - `messaging/telegram_provider.py` - Telegram Bot API integration
+  - `messaging/twilio_provider.py` - Twilio SMS integration  
+  - `messaging/messagecentral_provider.py` - MessageCentral SMS integration
+  - `messaging/handler.py` - Unified message processing with LangGraph
+
+#### 3. Cloud Functions (Active)
+- **`email-watcher`** - Email processing with task detection and deletion
+- **`telegram-function`** - Telegram webhook handler with user mapping
+- **`unified-task-processor`** - Routes tasks to appropriate messaging channels
+- **`send-email-simple`** - Utility for sending emails
+
+## 📋 Development Commands
+
+### Cloud Function Operations
 ```bash
-# Install Node.js dependencies
+# Deploy email watcher (detects task emails and deletes them)
+cd email_watcher_function
+npm run deploy
+
+# Deploy Telegram function
+cd telegram_function  
+./deploy_telegram_function.sh
+
+# Deploy unified task processor
+cd unified_task_processor
+./deploy_unified_task_processor.sh
+
+# Check function logs
+gcloud functions logs read email-watcher --region=us-central1 --limit=30
+gcloud functions logs read telegram-function --region=us-central1 --limit=30
+```
+
+### Local Testing
+```bash
+# Test LangGraph SDK integration
+python test_langgraph_sdk.py
+
+# Test unified messaging locally
+cd messaging
+python -m pytest test_providers.py
+
+# Run email watcher locally
+cd email_watcher_function
+node run_local.js
+```
+
+### Environment Setup
+```bash
+# Install messaging dependencies
+pip install -r messaging/requirements.txt
+
+# Install email function dependencies  
+cd email_watcher_function
 npm install
-
-# Start local email integration
-npm start
-
-# Start email watcher locally
-source .env && node email_langgraph_integration.js
 ```
 
-### LangGraph Operations
+## 🔄 Message Routing Logic
+
+### Phone Number Format Detection
+- **Numeric phone** (e.g., `+1234567890`) → SMS via Twilio/MessageCentral
+- **Non-numeric handle** (e.g., `@username`) → Telegram via bot
+
+### Task Creation Sources
+1. **Frontend Form** → `unified-task-processor` → Messaging channel
+2. **Email** → `email-watcher` → Task detection → `unified-task-processor` → Messaging channel
+
+### User Mapping (Telegram)
+- **Username → Chat ID**: Stored in Firestore `telegram_users` collection
+- **Auto-mapping**: When users first message the bot
+- **Lookup**: Required for sending messages to @username handles
+
+## 🗂️ Key Files and Purposes
+
+### Unified Messaging System
+- `messaging/base.py` - Core messaging abstractions and manager
+- `messaging/telegram_provider.py` - Telegram Bot API implementation
+- `messaging/twilio_provider.py` - Twilio SMS provider
+- `messaging/messagecentral_provider.py` - MessageCentral SMS provider
+- `messaging/handler.py` - Unified message processing with LangGraph integration
+
+### Cloud Functions (Current)
+- `email_watcher_function/index.js` - Email processing with task detection and deletion
+- `telegram_function/main.py` - Telegram webhook with user mapping and pending task detection
+- `unified_task_processor/main.py` - Task routing to appropriate messaging channels
+
+### LangGraph Integration
+- `oneNodeRemMem.py` - Main conversational agent
+- `test_langgraph_sdk.py` - SDK integration testing
+- `langgraph.json` - Deployment configuration
+
+## 🔧 Environment Variables
+
+### Required for All Functions
 ```bash
-# Deploy LangGraph service (requires langgraph CLI)
-langgraph deploy
-
-# Test LangGraph service locally
-langgraph dev
-```
-
-### Cloud Function Deployment
-```bash
-# Deploy email processing function (Pub/Sub triggered)
-./deploy_process_email.sh
-
-# Deploy HTTP email processing function
-./deploy_updated_cloud_function.sh
-```
-
-### Testing Commands
-```bash
-# Test Telegram bot integration
-python test_telegram_integration.py
-
-# Test HTTP webhook with full payload
-curl -X POST https://process-message-http-cs64iuly6q-uc.a.run.app \
-  -H "Content-Type: application/json" \
-  -d '{"Customer Name": "Test User", "custemail": "test@example.com", "Task": "Test Task"}'
-
-# Test Telegram webhook directly
-curl -X POST http://localhost:5000/telegram/webhook \
-  -H "Content-Type: application/json" \
-  -d '{"message": {"chat": {"id": 123}, "from": {"id": 123, "username": "test"}, "text": "Hello bot!"}}'
-
-# Check Telegram bot health
-curl http://localhost:5000/telegram/health
-```
-
-## Architecture Overview
-
-### Core System Components
-- **Telegram Integration** (Primary): Telegram webhooks → Flask server → LangGraph → Telegram responses
-- **SMS Integration**: Twilio/MessageCentral webhooks → Cloud Functions → LangGraph → SMS Response  
-- **LangGraph Agent**: Deployed on LangGraph Cloud, handles conversational AI with 7-turn limit
-- **State Management**: Firebase Firestore for persistent conversation storage
-- **Email Processing** (Deprecated): Gmail IMAP → Cloud Scheduler → Pub/Sub → Cloud Functions → LangGraph → Email Response
-
-### Key Files and Their Purposes
-
-#### LangGraph Implementation
-- `oneNodeRemMem.py` - Main LangGraph conversation agent with configurable prompts (prizm/generic/debug modes)
-- `langgraph.json` - LangGraph deployment configuration defining the "moBettah" graph
-- `langgraph_server.py` - Local Flask server for testing LangGraph functionality
-
-#### Cloud Functions  
-- `cloud_function/main.py` - Primary cloud function with HTTP and Pub/Sub triggers for email processing
-- `cloud_function/agent.py` - Agent orchestration logic that calls deployed LangGraph service
-- `simple_email_function/main.py` - SMTP email sending via Gmail App Password
-
-#### Email Integration
-- `email_langgraph_integration.js` - Node.js email watcher using IMAP with Firebase state management
-- `email_watcher_function/index.js` - Cloud Function version of email watcher
-
-#### Communication Integrations
-- `telegram_bot.py` - Primary Telegram Bot integration with Flask webhook server
-- `messagecentral_sms.py` - MessageCentral SMS provider integration
-- `sms_webhook_server.py` - Local webhook server for SMS testing
-- `email_langgraph_integration.js` - Deprecated email integration
-
-### Configuration and State Management
-
-#### Environment Variables Required
-```bash
-# Telegram Configuration (Primary)
-TELEGRAM_BOT_TOKEN=your-telegram-bot-token
-TELEGRAM_WEBHOOK_URL=https://your-domain.com/telegram/webhook
-
-# OpenAI Configuration  
-OPENAI_API_KEY=your-openai-key
-
-# LangGraph Deployment
-LANGGRAPH_DEPLOYMENT_URL=your-langgraph-url
-LANGGRAPH_API_KEY=your-langgraph-key
+# LangGraph Integration
+LANGGRAPH_DEPLOYMENT_URL=https://prizm2-9d0348d2abe5594d8b533da6f9b05cac.us.langgraph.app
+LANGGRAPH_API_KEY=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
 
 # Firebase Configuration
-FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_PROJECT_ID=prizmpoc
 FIREBASE_API_KEY=your-firebase-key
+FIREBASE_AUTH_DOMAIN=your-domain.firebaseapp.com
+FIREBASE_STORAGE_BUCKET=your-bucket.appspot.com
 
-# SMS Configuration
+# Telegram Integration
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+
+# SMS Integration  
 TWILIO_ACCOUNT_SID=your-twilio-sid
 TWILIO_AUTH_TOKEN=your-twilio-token
-USE_MESSAGECENTRAL=true/false
+TWILIO_PHONE_NUMBER=your-twilio-number
+MC_CUSTOMER_ID=your-messagecentral-id
+MC_PASSWORD=your-messagecentral-password
 
-# Email Configuration (Deprecated)
-GMAIL_USER=your-gmail@gmail.com
+# Email Processing
+GMAIL_USER=foilboi808@gmail.com
 GMAIL_APP_PASSWORD=your-gmail-app-password
+UNIFIED_TASK_PROCESSOR_URL=https://unified-task-processor-cs64iuly6q-uc.a.run.app
 ```
 
-#### State Structure
-Conversation states stored in Firestore with schema:
+## 📊 Data Storage
+
+### Firestore Collections
+- **`telegram_users`** - Username to chat_id mappings
+- **`tasks`** - Task records with messaging channel info
+- **`processedEmails`** - Email deduplication tracking
+
+### Task Record Schema
 ```json
 {
-  "conversation_history": "Question: ...\nLearned: ...",
-  "is_complete": false,
-  "turn_count": 3,
-  "user_email": "user@example.com", 
-  "completion_state": "in_progress"
+  "task_id": "unique_task_identifier",
+  "customer_email": "user@example.com", 
+  "phone_number": "+1234567890 or @username",
+  "messaging_provider": "telegram|twilio|messagecentral",
+  "contact_identifier": "chat_id or phone_number",
+  "conversation_state": {
+    "turn_count": 0,
+    "is_complete": false,
+    "conversation_history": ""
+  }
 }
 ```
 
-### Communication Flow Patterns
-1. **Email Flow**: IMAP polling → Pub/Sub message → Firebase auth → LangGraph processing → SMTP response
-2. **SMS Flow**: Webhook → Authentication → LangGraph processing → SMS API response
-3. **State Management**: All conversations tracked with unique keys: `{user_email}_{task_title}_{timestamp}`
+## 🚀 Current Features
 
-### Agent Behavior
-- **Turn Limit**: Maximum 7 conversation turns per task
-- **Prompt Modes**: Configurable via `AGENT_PROMPT_TYPE` (prizm/generic/debug)
-- **Task Completion**: Automatically determined by LangGraph agent based on information gathering
-- **Memory**: Full conversation history maintained in Firestore
+### ✅ Implemented
+- Unified messaging abstraction with provider swapping
+- Telegram bot integration with username mapping
+- SMS integration (Twilio + MessageCentral)
+- Email task detection and automatic deletion
+- Task routing based on phone number format
+- LangGraph agent integration
+- Firestore state management
 
-### Deployment Architecture
-- **Google Cloud Functions**: Serverless email/SMS processing
-- **LangGraph Cloud**: AI agent hosting with SDK integration
-- **Firebase Firestore**: Persistent state and authentication  
-- **Cloud Scheduler**: Automated email polling every 2 minutes
-- **Pub/Sub**: Asynchronous message processing between components
+### 🔄 Active Flows
+1. **New Task Flow**: Frontend/Email → Task Processor → Messaging → LangGraph → Response
+2. **Message Flow**: User Message → Provider → Unified Handler → LangGraph → Response
+3. **Email Cleanup**: Task emails automatically deleted after processing
 
-### Testing Approach
-- Local testing via Flask server (`langgraph_server.py`)
-- Live integration tests for SMS providers (`test_messagecentral_integration.py`)
-- End-to-end conversation testing (`test_live_conversation.py`)
-- Cloud function testing via HTTP endpoints and deployment scripts
+## 🔍 Troubleshooting
+
+### Check Function Status
+```bash
+gcloud functions list --filter="name~(email|telegram|unified)"
+```
+
+### View Recent Logs
+```bash
+gcloud functions logs read FUNCTION_NAME --region=us-central1 --limit=20
+```
+
+### Test Deployments
+```bash
+gcloud functions call FUNCTION_NAME --region=us-central1
+```
+
+### Common Issues
+- **Telegram messages fail**: Check username to chat_id mapping in Firestore
+- **SMS routing fails**: Verify phone number format detection
+- **Task creation fails**: Check unified task processor logs and environment variables
+- **Email deletion fails**: Verify IMAP permissions and UID availability
