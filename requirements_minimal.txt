@@ -1,0 +1,8 @@
+# Minimal requirements for standalone Telegram bot
+requests>=2.31.0
+
+# Optional: For better JSON handling
+# json5>=0.9.0
+
+# Optional: For async support (if needed later)
+# aiohttp>=3.8.0 
