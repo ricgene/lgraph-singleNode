@@ -189,6 +189,44 @@ def determine_messaging_channel(phone_number: str) -> tuple[MessageProvider, str
         else:
             raise ValueError("Telegram provider not available")
 
+def create_conversation_record(task_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a conversation record in the conversations collection for compatibility"""
+    try:
+        # Extract fields from task record
+        task_id = task_record['task_id']
+        customer_email = task_record['customer_email']
+        task_title = task_record['task_title']
+        customer_name = task_record['customer_name']
+        
+        # Create conversation record in old format
+        conversation_record = {
+            'taskId': task_id,
+            'taskTitle': task_title,
+            'userEmail': customer_email,
+            'userFirstName': customer_name.split()[0] if customer_name else customer_email.split('@')[0],
+            'createdAt': task_record['created_at'],
+            'lastUpdated': task_record['created_at'],
+            'status': 'active',
+            'conversationHistory': [],
+            'fullInputHistory': [],
+            'turn_count': 0,
+            # Add reference to tasks collection
+            'task_record_id': task_id,
+            'messaging_provider': task_record['messaging_provider'],
+            'contact_identifier': task_record['contact_identifier']
+        }
+        
+        # Store in conversations collection
+        doc_ref = db.collection('conversations').document(task_id)
+        doc_ref.set(conversation_record)
+        
+        logger.info(f"Created conversation record {task_id} in conversations collection")
+        return conversation_record
+        
+    except Exception as e:
+        logger.error(f"Error creating conversation record: {str(e)}")
+        raise
+
 def create_task_record(task_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a task record in Firestore"""
     try:
@@ -238,6 +276,9 @@ def create_task_record(task_data: Dict[str, Any]) -> Dict[str, Any]:
         # Store in Firestore
         doc_ref = db.collection('tasks').document(task_id)
         doc_ref.set(task_record)
+        
+        # Also create conversation record for compatibility
+        create_conversation_record(task_record)
         
         logger.info(f"Created task record {task_id} for {provider_type.value} channel")
         return task_record
