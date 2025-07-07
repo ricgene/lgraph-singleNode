@@ -97,6 +97,8 @@ function extractTaskDataFromEmail(parsed, userEmail) {
   const html = parsed.html || '';
   const content = text || html;
   
+  console.log('Raw email content:', content);
+  
   // Initialize task data structure
   const taskData = {
     custemail: userEmail,
@@ -106,42 +108,62 @@ function extractTaskDataFromEmail(parsed, userEmail) {
     rawContent: content
   };
   
-  // Extract common task fields using regex patterns
-  const patterns = {
-    'Customer Name': /customer\s*name\s*:?\s*([^\n\r]+)/i,
-    'Task': /task\s*:?\s*([^\n\r]+)/i,
-    'Task Budget': /(?:task\s*)?budget\s*:?\s*([^\n\r]+)/i,
-    'Category': /category\s*:?\s*([^\n\r]+)/i,
-    'DueDate': /due\s*date\s*:?\s*([^\n\r]+)/i,
-    'Posted': /posted\s*:?\s*([^\n\r]+)/i,
-    'FullAddress': /(?:full\s*)?address\s*:?\s*([^\n\r]+)/i,
-    'Full Address': /full\s*address\s*:?\s*([^\n\r]+)/i,
-    'State': /state\s*:?\s*([^\n\r]+)/i,
-    'Phone': /phone\s*(?:number)?\s*:?\s*([^\n\r]+)/i,
-    'vendors': /vendors?\s*:?\s*([^\n\r]+)/i
-  };
+  // Custom parser for this specific format
+  // The content looks like: "field":value, "field":value
+  const lines = content.split('\n');
   
-  // Extract data using patterns
-  for (const [field, pattern] of Object.entries(patterns)) {
-    const match = content.match(pattern);
-    if (match && match[1]) {
-      taskData[field] = match[1].trim();
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (trimmedLine.includes('":')) {
+      // Extract field name and value
+      const colonIndex = trimmedLine.indexOf('":');
+      if (colonIndex > 0) {
+        const fieldName = trimmedLine.substring(1, colonIndex); // Remove leading quote
+        let value = trimmedLine.substring(colonIndex + 2); // Skip ":"
+        
+        // Remove trailing comma and quotes
+        value = value.replace(/,$/, '').replace(/^"|"$/g, '');
+        
+        // Clean up the value
+        value = value.trim();
+        
+        // Map field names to expected format
+        const fieldMapping = {
+          'custemail': 'custemail',
+          'phone': 'phone',
+          'Task': 'Task',
+          'description': 'description',
+          'Category': 'Category',
+          'DueDate': 'DueDate',
+          'Posted': 'Posted',
+          'FullAddress': 'FullAddress',
+          'Task Budget': 'Task Budget',
+          'State': 'State',
+          'vendors': 'vendors'
+        };
+        
+        const mappedField = fieldMapping[fieldName];
+        if (mappedField && value) {
+          taskData[mappedField] = value;
+          console.log(`✅ Extracted ${mappedField}: ${value}`);
+        }
+      }
     }
   }
   
   // Set default values if not found
-  if (!taskData['Customer Name']) {
-    taskData['Customer Name'] = userEmail.split('@')[0]; // Use email prefix as fallback
+  if (!taskData['Customer Name'] && taskData.custemail) {
+    taskData['Customer Name'] = taskData.custemail.split('@')[0];
   }
   
-  if (!taskData['Task']) {
-    taskData['Task'] = parsed.subject || 'Email Task';
+  if (!taskData['Task'] && parsed.subject) {
+    taskData['Task'] = parsed.subject;
   }
   
   // Set description from email content
   taskData.description = content.substring(0, 500); // First 500 chars as description
   
-  console.log('Extracted task data:', JSON.stringify(taskData, null, 2));
+  console.log('📋 Final extracted task data:', JSON.stringify(taskData, null, 2));
   
   return taskData;
 }
