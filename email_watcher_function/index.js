@@ -180,13 +180,13 @@ async function processEmail(imap, stream, info) {
 
     if (!messageId) {
       console.log('No Message-ID found, skipping.');
-      return;
+      return { shouldDelete: false };
     }
 
     // Firestore deduplication with logging
     if (await isProcessed(messageId)) {
       console.log(`🚫 Already processed: ${messageId}`);
-      return;
+      return { shouldDelete: false };
     }
 
     // Skip system-generated emails but allow task creation emails from same account
@@ -203,7 +203,7 @@ async function processEmail(imap, stream, info) {
       
       if (isSystemEmail) {
         console.log('🚫 Skipping system-generated email from our own address:', from, 'Subject:', subject);
-        return;
+        return { shouldDelete: false };
       } else {
         console.log('✅ Processing task email from monitored account:', from, 'Subject:', subject);
       }
@@ -263,7 +263,7 @@ async function processEmail(imap, stream, info) {
         }
       } else {
         console.log(`⏭️ Skipping email - not a task creation email. Subject: ${subject}`);
-        return; // Don't process or delete non-task emails
+        return { shouldDelete: false }; // Don't process or delete non-task emails
       }
     }
     
@@ -271,48 +271,17 @@ async function processEmail(imap, stream, info) {
       // Mark as processed in Firestore
       await markProcessed(messageId, { from, subject, taskCreation: isTaskCreationEmail });
       
-      // Delete email after successful processing to prevent duplicates
-      if (uid) {
-        try {
-          console.log(`🗑️ Deleting email UID: ${uid}`);
-          
-          // Mark email as deleted
-          await new Promise((resolve, reject) => {
-            imap.addFlags(uid, '\\Deleted', (err) => {
-              if (err) {
-                console.error('❌ Failed to mark email for deletion:', err);
-                reject(err);
-              } else {
-                console.log('✅ Marked email for deletion - UID:', uid);
-                resolve();
-              }
-            });
-          });
-          
-          // Expunge (permanently delete) the email
-          await new Promise((resolve, reject) => {
-            imap.expunge((err) => {
-              if (err) {
-                console.error('❌ Failed to expunge deleted email:', err);
-                reject(err);
-              } else {
-                console.log('🗑️ Successfully deleted email UID:', uid);
-                resolve();
-              }
-            });
-          });
-          
-        } catch (deleteError) {
-          console.error('❌ Error deleting email:', deleteError);
-          // Continue processing even if deletion fails
-        }
-      } else {
-        console.log('⚠️ Could not delete email (no UID available) - relying on Firestore tracking');
-      }
+      // Return result indicating email should be deleted
+      console.log(`✅ Email processed successfully - will be deleted`);
+      return { shouldDelete: true, uid, messageId };
+    } else {
+      console.log(`❌ Email processing failed - will not be deleted`);
+      return { shouldDelete: false };
     }
     
   } catch (error) {
     console.error('❌ Error processing email:', error);
+    return { shouldDelete: false };
   }
 }
 
@@ -345,71 +314,112 @@ async function checkEmails() {
   return new Promise((resolve, reject) => {
     const imap = createImapConnection();
     let pendingOperations = 0;
+    let emailsToDelete = []; // Track emails that need deletion
 
     imap.once('ready', async () => {
       console.log('IMAP connection ready');
       try {
         await listFolders(imap);
-        imap.openBox('INBOX', false, (err, box) => {
-          if (err) {
-            console.error('Error opening INBOX:', err);
-            imap.end();
-            resolve();
-            return;
-          }
-          console.log('Checking folder: INBOX');
-          imap.search(['ALL'], (err, results) => {
-            if (err) {
-              console.error('Search error in INBOX:', err);
-              imap.end();
-              resolve();
-              return;
-            }
-            if (results.length === 0) {
-              console.log('No emails found in INBOX');
-              imap.end();
-              resolve();
-              return;
-            }
-            console.log(`Found ${results.length} emails in INBOX`);
-            const recentEmails = results.slice(-10);
-            console.log(`Processing ${recentEmails.length} most recent emails`);
-            const fetch = imap.fetch(recentEmails, { bodies: '', struct: true, extensions: true });
-            fetch.on('message', (msg, seqno) => {
-              let uid = null;
-              msg.on('attributes', (attrs) => {
-                uid = attrs.uid;
-              });
-              msg.on('body', (stream, info) => {
-                pendingOperations++;
-                processEmail(imap, stream, { uid: uid, seqno: seqno }).finally(() => {
-                  pendingOperations--;
-                  if (pendingOperations === 0) {
-                    setTimeout(() => {
-                      console.log('Finished processing INBOX');
-                      imap.end();
-                      resolve();
-                    }, 2000);
+        
+        // Check both INBOX and All Mail folders
+        const foldersToCheck = ['INBOX', '[Gmail]/All Mail'];
+        
+        for (const folderName of foldersToCheck) {
+          console.log(`Checking folder: ${folderName}`);
+          
+          try {
+            await new Promise((folderResolve, folderReject) => {
+              imap.openBox(folderName, false, (err, box) => {
+                if (err) {
+                  console.error(`Error opening ${folderName}:`, err);
+                  folderResolve();
+                  return;
+                }
+                
+                if (box.messages.total === 0) {
+                  console.log(`No emails found in ${folderName}`);
+                  folderResolve();
+                  return;
+                }
+                
+                console.log(`Found ${box.messages.total} emails in ${folderName}`);
+                imap.search(['ALL'], (err, results) => {
+                  if (err) {
+                    console.error(`Search error in ${folderName}:`, err);
+                    folderResolve();
+                    return;
                   }
+                  
+                  const recentEmails = results.slice(-10);
+                  console.log(`Processing ${recentEmails.length} most recent emails from ${folderName}`);
+                  
+                  if (recentEmails.length === 0) {
+                    folderResolve();
+                    return;
+                  }
+                  
+                  const fetch = imap.fetch(recentEmails, { bodies: '', struct: true, extensions: true });
+                  
+                  fetch.on('message', (msg, seqno) => {
+                    let uid = null;
+                    msg.on('attributes', (attrs) => {
+                      uid = attrs.uid;
+                    });
+                    msg.on('body', (stream, info) => {
+                      pendingOperations++;
+                      processEmail(imap, stream, { uid: uid, seqno: seqno, folder: folderName }).then((result) => {
+                        // Track emails that were successfully processed and need deletion
+                        if (result && result.shouldDelete && uid) {
+                          emailsToDelete.push({ uid, folder: folderName });
+                          console.log(`📝 Queued email UID ${uid} from ${folderName} for deletion`);
+                        }
+                      }).catch((error) => {
+                        console.error(`❌ Error processing email ${seqno} from ${folderName}:`, error);
+                      }).finally(() => {
+                        pendingOperations--;
+                        if (pendingOperations === 0) {
+                          // Delete all queued emails before closing connection
+                          deleteQueuedEmails(imap, emailsToDelete).then(() => {
+                            console.log(`Finished processing ${folderName}`);
+                            folderResolve();
+                          }).catch((error) => {
+                            console.error('Error during final deletion:', error);
+                            folderResolve();
+                          });
+                        }
+                      });
+                    });
+                  });
+                  
+                  fetch.once('error', (err) => {
+                    console.error(`Fetch error in ${folderName}:`, err);
+                    folderResolve();
+                  });
+                  
+                  fetch.once('end', () => {
+                    if (pendingOperations === 0) {
+                      // Delete all queued emails before closing connection
+                      deleteQueuedEmails(imap, emailsToDelete).then(() => {
+                        console.log(`Finished processing ${folderName}`);
+                        folderResolve();
+                      }).catch((error) => {
+                        console.error('Error during final deletion:', error);
+                        folderResolve();
+                      });
+                    }
+                  });
                 });
               });
             });
-            fetch.once('error', (err) => {
-              console.error('Fetch error in INBOX:', err);
-              imap.end();
-              resolve();
-            });
-            fetch.once('end', () => {
-              if (pendingOperations === 0) {
-                setTimeout(() => {
-                  console.log('Finished processing INBOX');
-                  imap.end();
-                  resolve();
-                }, 2000);
-              }
-            });
-          });
-        });
+          } catch (folderError) {
+            console.error(`Error processing folder ${folderName}:`, folderError);
+          }
+        }
+        
+        console.log('Finished processing all folders');
+        imap.end();
+        resolve();
+        
       } catch (error) {
         console.error('Error in checkEmails:', error);
         imap.end();
@@ -426,6 +436,78 @@ async function checkEmails() {
     });
     imap.connect();
   });
+}
+
+// Helper function to delete queued emails
+async function deleteQueuedEmails(imap, emailsToDelete) {
+  if (emailsToDelete.length === 0) {
+    console.log('ℹ️ No emails queued for deletion');
+    return;
+  }
+  
+  console.log(`🗑️ Deleting ${emailsToDelete.length} processed emails...`);
+  
+  try {
+    // Group emails by folder
+    const emailsByFolder = {};
+    emailsToDelete.forEach(email => {
+      if (!emailsByFolder[email.folder]) {
+        emailsByFolder[email.folder] = [];
+      }
+      emailsByFolder[email.folder].push(email.uid);
+    });
+    
+    // Delete emails from each folder
+    for (const [folder, uids] of Object.entries(emailsByFolder)) {
+      console.log(`🗑️ Processing deletions for folder: ${folder}`);
+      
+      // Open the folder
+      await new Promise((resolve, reject) => {
+        imap.openBox(folder, false, (err) => {
+          if (err) {
+            console.error(`❌ Error opening ${folder} for deletion:`, err);
+            resolve();
+          } else {
+            resolve();
+          }
+        });
+      });
+      
+      // Mark emails as deleted
+      for (const uid of uids) {
+        await new Promise((resolve, reject) => {
+          imap.addFlags(uid, '\\Deleted', (err) => {
+            if (err) {
+              console.error(`❌ Failed to mark email UID ${uid} in ${folder} for deletion:`, err);
+              resolve(); // Continue with other emails
+            } else {
+              console.log(`✅ Marked email UID ${uid} in ${folder} for deletion`);
+              resolve();
+            }
+          });
+        });
+      }
+      
+      // Expunge deleted emails from this folder
+      await new Promise((resolve, reject) => {
+        imap.expunge((err) => {
+          if (err) {
+            console.error(`❌ Failed to expunge deleted emails from ${folder}:`, err);
+            resolve(); // Continue with other folders
+          } else {
+            console.log(`🗑️ Successfully deleted ${uids.length} emails from ${folder}`);
+            resolve();
+          }
+        });
+      });
+    }
+    
+    console.log(`✅ Completed deletion of ${emailsToDelete.length} emails from all folders`);
+    
+  } catch (error) {
+    console.error('❌ Error during batch deletion:', error);
+    throw error;
+  }
 }
 
 // Exported function for serverless/cloud function use
